@@ -24,13 +24,13 @@ one small C file (`src/c_sys.c`).
 ## Conventions for people reading or extending the code
 
 Goose has no privacy and no nested namespaces: every declaration in a package is public. So that a reader can
-tell the API from the machinery at a glance, internal names carry a prefix, and the rule does not change:
+tell the API from the machinery at a glance, names carry a marker, and the rule does not change:
 
 | Name looks like | Meaning |
 |---|---|
 | `parse_hello`, `Config`, `Worker`, `Event`, `serve` | **Public API.** Documented in design/02 and covered by tests. |
-| `router_close_connection`, `router_ConnectionSlot`, `ROUTER_STATE_FORWARDING` | **Internal.** Starts with `router_` (`ROUTER_` for constants), and is spelled out in full. May change or vanish in any release; do not use. |
-| `c_listen`, `c_epoll_wait` | **The C functions in `src/c_sys.c`, and only those.** Goose never uses a `c_` name: `sys.goose` binds each one under a `router_` name (`router_socket_listen = "c_listen"`). |
+| `_close_connection`, `_ConnectionSlot`, `_STATE_FORWARDING`, `_connection_slots` | **Private.** A leading underscore, then the name spelled out in full. May change or vanish in any release; do not use. (The underscore is a convention, not enforcement: nothing stops `tcprouter::_close_connection`.) |
+| `c_listen`, `c_epoll_wait`, `c_EpollEvent`, `c_EAGAIN` | **Comes from C.** The functions in `src/c_sys.c` and their declarations in `sys.goose` (same names, no renaming), plus the constants and structs that mirror C's. A `c_` name at a call site tells you the call leaves Goose. |
 
 Every file declares `namespace tcprouter;`.
 Library code never reads files, environment variables or flags, never calls `abort` or `exit` because of

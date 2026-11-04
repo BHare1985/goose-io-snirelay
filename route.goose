@@ -31,20 +31,20 @@ fn match_route(cfg: const Config&, listener: u16, hello: Hello) -> const Route? 
     if !routable { return null; }
 
     // Without inspection nobody read a hello: only Any rows can match (B3).
-    if inspect == Inspect.None { return router_first_any_route(cfg, listener); }
+    if inspect == Inspect.None { return _first_any_route(cfg, listener); }
 
     return match hello {
-        Found f => router_route_for_name(cfg, listener, f.name),
-        _ => router_route_without_name(cfg, listener),      // NoSni or NotTls
+        Found f => _route_for_name(cfg, listener, f.name),
+        _ => _route_without_name(cfg, listener),      // NoSni or NotTls
     };
 }
 
 // Internal: a client with a name: exact, then the longest suffix, then Any.
-fn router_route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -> const Route? {
+fn _route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -> const Route? {
     for &r in cfg.routes {
         if r.listener != listener { continue; }
         match r.on {
-            Sni s => { if router_same_host_name(s.name, name) { return r; } },
+            Sni s => { if _same_host_name(s.name, name) { return r; } },
             _ => {},
         }
     }
@@ -54,8 +54,8 @@ fn router_route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -
         if r.listener != listener { continue; }
         match r.on {
             SniSuffix s => {
-                let suffix = router_trim_trailing_dot(s.name);
-                if suffix.len > best_len && router_is_below_suffix(name, suffix) {
+                let suffix = _trim_trailing_dot(s.name);
+                if suffix.len > best_len && _is_below_suffix(name, suffix) {
                     best .= r;
                     best_len = suffix.len;
                 }
@@ -64,11 +64,11 @@ fn router_route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -
         }
     }
     if best { return best; }
-    return router_first_any_route(cfg, listener);
+    return _first_any_route(cfg, listener);
 }
 
 // Internal: a client with no name, or not TLS at all: a NoSni row, then Any.
-fn router_route_without_name(cfg: const Config&, listener: u16) -> const Route? {
+fn _route_without_name(cfg: const Config&, listener: u16) -> const Route? {
     for &r in cfg.routes {
         if r.listener != listener { continue; }
         match r.on {
@@ -76,10 +76,10 @@ fn router_route_without_name(cfg: const Config&, listener: u16) -> const Route? 
             _ => {},
         }
     }
-    return router_first_any_route(cfg, listener);
+    return _first_any_route(cfg, listener);
 }
 
-fn router_first_any_route(cfg: const Config&, listener: u16) -> const Route? {
+fn _first_any_route(cfg: const Config&, listener: u16) -> const Route? {
     for &r in cfg.routes {
         if r.listener != listener { continue; }
         match r.on {
@@ -91,29 +91,29 @@ fn router_first_any_route(cfg: const Config&, listener: u16) -> const Route? {
 }
 
 // Internal: `name` without one trailing dot.
-fn router_trim_trailing_dot(name: const u8[:]) -> const u8[:] {
+fn _trim_trailing_dot(name: const u8[:]) -> const u8[:] {
     if name.len > 0 && name[name.len - 1] == '.' { return name[..name.len - 1]; }
     return name;
 }
 
-fn router_lowercase(c: u8) -> u8 { return if c >= 'A' && c <= 'Z' { c + 32 } else { c }; }
+fn _lowercase(c: u8) -> u8 { return if c >= 'A' && c <= 'Z' { c + 32 } else { c }; }
 
 // Internal: equal as host names: ASCII case ignored, one trailing dot ignored on either side. Empty
 // names are never equal to anything.
-fn router_same_host_name(a: const u8[:], b: const u8[:]) -> bool {
-    let x = router_trim_trailing_dot(a);
-    let y = router_trim_trailing_dot(b);
+fn _same_host_name(a: const u8[:], b: const u8[:]) -> bool {
+    let x = _trim_trailing_dot(a);
+    let y = _trim_trailing_dot(b);
     if x.len == 0 || x.len != y.len { return false; }
-    for i in x.len { if router_lowercase(x[i]) != router_lowercase(y[i]) { return false; } }
+    for i in x.len { if _lowercase(x[i]) != _lowercase(y[i]) { return false; } }
     return true;
 }
 
 // Internal: `name` ends in "." followed by `suffix` (so the apex itself is not below it).
-fn router_is_below_suffix(name: const u8[:], suffix: const u8[:]) -> bool {
-    let n = router_trim_trailing_dot(name);
+fn _is_below_suffix(name: const u8[:], suffix: const u8[:]) -> bool {
+    let n = _trim_trailing_dot(name);
     if suffix.len == 0 || n.len <= suffix.len + 1 { return false; }
     if n[n.len - suffix.len - 1] != '.' { return false; }
     let tail = n[n.len - suffix.len..];
-    for i in suffix.len { if router_lowercase(tail[i]) != router_lowercase(suffix[i]) { return false; } }
+    for i in suffix.len { if _lowercase(tail[i]) != _lowercase(suffix[i]) { return false; } }
     return true;
 }

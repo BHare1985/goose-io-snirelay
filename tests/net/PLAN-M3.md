@@ -35,7 +35,7 @@ one byte and then `forward` (must be refused), tag 6 `reset` at once, tag 7 the 
   Pass: `accepted == 1,000,000`, `open == 0` at the end, `stale_events` is whatever it is but no connection ever got another
   one's bytes: every client sends its own 16-byte tag first and checks that what it reads back is that tag (a stale
   event touching a reused slot would show as a wrong tag or a hang).
-- RT-2c as a Goose unit test (`tests/unit/generation_test.goose`, uses the internal `router_dispatch_event`): a started worker is fed
+- RT-2c as a Goose unit test (`tests/unit/generation_test.goose`, uses the internal `_dispatch_event`): a started worker is fed
   events whose slot is past the table, whose generation is old, and whose kind is unknown: `bad_events` and `stale_events` count
   them, nothing else changes, nothing aborts.
 
@@ -88,6 +88,6 @@ Handler functions (`send`, `close`, `reset`, `set_user`, `forward`, `pause_readi
 1. Is a small C echo backend (`harness/echo_server.c`, compiled by run_tests.sh with the same C compiler) acceptable for RT-2b? It is
    independent of our code and fast enough; Python cannot do 100k accepts per second.
 2. RT-4c done only when its timed-out half has run in M4: agreed?
-3. RT-2c through the internal `router_dispatch_event` in a unit test: acceptable, since the kernel will not send an out-of-range slot?
+3. RT-2c through the internal `_dispatch_event` in a unit test: acceptable, since the kernel will not send an out-of-range slot?
 4. RT-1b's "at least 50 of 400 per worker" depends on the kernel's SO_REUSEPORT hash over client source ports. If this host spreads worse, do we
    change the threshold or the engine (for example by accepting in a round robin of workers)? I propose we look at the measured spread first.

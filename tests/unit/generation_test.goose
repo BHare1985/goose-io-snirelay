@@ -4,7 +4,7 @@
 //     goose build --debug tests/unit/generation_test.goose && ./tests/unit/generation_test
 //
 // The kernel never sends an out-of-range slot, so the only way to test the check is to hand the dispatcher
-// events it would not get. This test therefore reaches INTERNAL names (router_dispatch_event, router_new_connection, router_pack_event_data, the
+// events it would not get. This test therefore reaches INTERNAL names (_dispatch_event, _new_connection, _pack_event_data, the
 // worker's c_ fields) on purpose; it is the one test allowed to. It starts a real worker on a loopback port,
 // gives it connections through socketpairs, and feeds events directly. tests/net/generation_test.py proves the
 // same row over a million real sockets.
@@ -32,18 +32,18 @@ fn start_worker(w: tcprouter::Worker&) -> bool {
 
 // Gives the worker one connection and runs its event loop by hand until no connection is open.
 fn run_until_closed(w: tcprouter::Worker&) {
-    var events: tcprouter::router_EpollEvent[8] = [tcprouter::router_EpollEvent { 0, 0 }; 8];
+    var events: tcprouter::c_EpollEvent[8] = [tcprouter::c_EpollEvent { 0, 0 }; 8];
     for round in 200 {
         if tcprouter::stats(w).open == 0 { return; }
-        let n = tcprouter::router_epoll_wait(w.router_epoll_fd, events[0], 8, 20);
-        for k in n { tcprouter::router_dispatch_event(w, events[k].data, events[k].events); }
+        let n = tcprouter::c_epoll_wait(w._epoll_fd, events[0], 8, 20);
+        for k in n { tcprouter::_dispatch_event(w, events[k].data, events[k].events); }
     }
 }
 
 fn give_connection(w: tcprouter::Worker&) {
     var sv: i32[2] = [0, 0];
     check(socketpair(1, 1, 0, sv) == 0, "a socketpair for a fake client");
-    tcprouter::router_new_connection(w, 0, sv[0]);
+    tcprouter::_new_connection(w, 0, sv[0]);
     close(sv[1]);
 }
 
@@ -64,30 +64,30 @@ fn main() {
     check(bad0 == 0, "no bad events from a real connection");
 
     // The connection used slot 0 at generation 1; closing bumped it to 2.
-    let CLIENT = tcprouter::ROUTER_EVENT_KIND_CLIENT;
-    let SERVER = tcprouter::ROUTER_EVENT_KIND_SERVER;
-    let IN = tcprouter::ROUTER_EPOLL_IN;
-    let OUT = tcprouter::ROUTER_EPOLL_OUT;
+    let CLIENT = tcprouter::_EVENT_KIND_CLIENT;
+    let SERVER = tcprouter::_EVENT_KIND_SERVER;
+    let IN = tcprouter::c_EPOLLIN;
+    let OUT = tcprouter::c_EPOLLOUT;
 
     // RT-2b: events for a connection that is gone.
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(CLIENT, 0, 1), IN);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(CLIENT, 0, 1), IN);
     s = tcprouter::stats(w);
     check(s.stale_events == stale0 + 1, "an event with the old generation is counted as stale");
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(SERVER, 0, 2), IN | OUT);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(SERVER, 0, 2), IN | OUT);
     s = tcprouter::stats(w);
     check(s.stale_events == stale0 + 2, "an event for a free slot, even at the current generation, is stale");
 
     // RT-2c: slot indices the table does not have.
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(CLIENT, 7, 1), IN);
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(SERVER, 1073741824, 1), IN);
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(CLIENT, 4294967295, 1), IN | OUT);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(CLIENT, 7, 1), IN);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(SERVER, 1073741824, 1), IN);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(CLIENT, 4294967295, 1), IN | OUT);
     s = tcprouter::stats(w);
     check(s.bad_events == bad0 + 3, "slot numbers past the table are counted as bad, not used");
 
     // Event kinds that do not exist, and a listener index that does not exist, are bad too.
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(9, 0, 2), IN);
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(0, 0, 2), IN);
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(tcprouter::ROUTER_EVENT_KIND_LISTENER, 5, 0), IN);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(9, 0, 2), IN);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(0, 0, 2), IN);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(tcprouter::_EVENT_KIND_LISTENER, 5, 0), IN);
     s = tcprouter::stats(w);
     check(s.bad_events == bad0 + 6, "unknown kinds and a listener index past the table are counted as bad");
     check(s.accepted == 1 && s.open == 0 && s.buffers_in_use == 0 && s.closed[5] == 1,
@@ -98,8 +98,8 @@ fn main() {
     give_connection(w);
     s = tcprouter::stats(w);
     check(s.accepted == 2 && s.open == 1, "a second connection is open (and uses the freed slot)");
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(SERVER, 0, 1), tcprouter::ROUTER_EPOLL_ERROR);
-    tcprouter::router_dispatch_event(w, tcprouter::router_pack_event_data(CLIENT, 0, 1), tcprouter::ROUTER_EPOLL_HANGUP);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(SERVER, 0, 1), tcprouter::c_EPOLLERR);
+    tcprouter::_dispatch_event(w, tcprouter::_pack_event_data(CLIENT, 0, 1), tcprouter::c_EPOLLHUP);
     s = tcprouter::stats(w);
     check(s.open == 1 && s.stale_events == stale0 + 4, "events of the old generation did not touch the new connection");
     run_until_closed(w);

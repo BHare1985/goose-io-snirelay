@@ -53,7 +53,7 @@ struct Stats {
 
 // A snapshot of this worker's counters. Call it on the worker's thread, e.g. from a Tick.
 fn stats(w: Worker&) -> Stats {
-    return w.router_stats;
+    return w._stats;
 }
 
 // --- the worker ---------------------------------------------------------------------------------
@@ -66,17 +66,17 @@ root struct Worker {
     error: u8[..200] = [],             // why start() returned false
     index: i64 = 0,
     cfg: Config = Config { .. },       // this worker's copy of the config
-    router_epoll_fd: i32 = -1,
-    router_listen_fds: i32[16] = [-1; 16], // one per cfg.listeners entry
-    router_round_robin: i64 = 0,                    // rotates the first target of the built-in policy
-    router_stats: Stats = Stats { .. },
-    router_connection_slots: router_ConnectionSlot[>..] = [],       // one per connection, reused through router_free_slots
-    router_free_slots: u32[>..<] = [],
-    router_buffer_pool: u8[>..] = [],             // buffers_per_worker buffers of buffer_size bytes, grown lazily
-    router_free_buffers: i32[>..<] = [],
-    router_waiting_reads: u64[>..] = [],         // reads waiting for a buffer, oldest first from router_waiting_reads_head
-    router_waiting_reads_head: i64 = 0,
-    router_listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
+    _epoll_fd: i32 = -1,
+    _listen_fds: i32[16] = [-1; 16], // one per cfg.listeners entry
+    _round_robin: i64 = 0,                    // rotates the first target of the built-in policy
+    _stats: Stats = Stats { .. },
+    _connection_slots: _ConnectionSlot[>..] = [],       // one per connection, reused through _free_slots
+    _free_slots: u32[>..<] = [],
+    _buffer_pool: u8[>..] = [],             // buffers_per_worker buffers of buffer_size bytes, grown lazily
+    _free_buffers: i32[>..<] = [],
+    _waiting_reads: u64[>..] = [],         // reads waiting for a buffer, oldest first from _waiting_reads_head
+    _waiting_reads_head: i64 = 0,
+    _listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
 }
 
 // Binds this worker's listeners (SO_REUSEPORT) and prepares its tables. Returns false and fills
@@ -85,22 +85,22 @@ root struct Worker {
 fn start(w: Worker&, cfg: Config, index: i64) -> bool {
     w.cfg = cfg;
     w.index = index;
-    if router_spawn_error.len > 0 {                          // spawn() found a listener it cannot bind
-        w.error.append(router_spawn_error);
+    if _spawn_error.len > 0 {                          // spawn() found a listener it cannot bind
+        w.error.append(_spawn_error);
         return false;
     }
-    w.router_epoll_fd = router_epoll_create();
-    if w.router_epoll_fd < 0 { return router_fail_start(w, "epoll_create", "", -w.router_epoll_fd); }
+    w._epoll_fd = c_epoll_create();
+    if w._epoll_fd < 0 { return _fail_start(w, "epoll_create", "", -w._epoll_fd); }
     for li in cfg.listeners.len {
-        var p = router_ParsedAddress { false, [0; 16], 0 };
+        var p = _ParsedAddress { false, [0; 16], 0 };
         let text = cfg.listeners[li].addr.text;
-        if !router_parse_address(text, p) { return router_fail_start(w, "bad listener address", text, 22); }
-        let fd = router_socket_listen(p.v6, p.ip, p.port, true, 1024);
-        if fd < 0 { return router_fail_start(w, "cannot listen on", text, -fd); }
-        w.router_listen_fds[li] = fd;
-        let rc = router_epoll_control(w.router_epoll_fd, ROUTER_EPOLL_CTL_ADD, fd, ROUTER_EPOLL_IN,
-                                             router_pack_event_data(ROUTER_EVENT_KIND_LISTENER, li, 0));
-        if rc < 0 { return router_fail_start(w, "epoll_ctl", text, -rc); }
+        if !_parse_address(text, p) { return _fail_start(w, "bad listener address", text, 22); }
+        let fd = c_listen(p.v6, p.ip, p.port, true, 1024);
+        if fd < 0 { return _fail_start(w, "cannot listen on", text, -fd); }
+        w._listen_fds[li] = fd;
+        let rc = c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, fd, c_EPOLLIN,
+                                             _pack_event_data(_EVENT_KIND_LISTENER, li, 0));
+        if rc < 0 { return _fail_start(w, "epoll_ctl", text, -rc); }
     }
     return true;
 }
@@ -110,17 +110,17 @@ fn start(w: Worker&, cfg: Config, index: i64) -> bool {
 // gets the worker so it can call send, close... Forward-only configs pass an empty block. (A `return`
 // in the block leaves the function that contains it: call a named function from the block.)
 fn serve<F>(w: Worker&) {
-    var events: router_EpollEvent[256] = [router_EpollEvent { 0, 0 }; 256];
+    var events: c_EpollEvent[256] = [c_EpollEvent { 0, 0 }; 256];
     var last_tick: i64 = 0;
     loop {
-        let n = router_epoll_wait(w.router_epoll_fd, events[0], 256, 100);
+        let n = c_epoll_wait(w._epoll_fd, events[0], 256, 100);
         if n < 0 {
-            router_pause_milliseconds(1);                     // an unexpected epoll error: do not spin
+            _pause_milliseconds(1);                     // an unexpected epoll error: do not spin
         } else {
-            for k in n { router_dispatch_event(w, events[k].data, events[k].events); }
+            for k in n { _dispatch_event(w, events[k].data, events[k].events); }
         }
-        let now = router_boottime_milliseconds();
-        router_resume_paused_listeners(w, now);
+        let now = c_boottime_ms();
+        _resume_paused_listeners(w, now);
         if now - last_tick >= 100 {
             last_tick = now;
             let tick: Event = Event.Tick { now_ms: now };
@@ -160,8 +160,8 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool { return false; }           
 
 // --- running workers and talking to them --------------------------------------------------------
 
-var router_signal_fd: i32 = -1;
-var router_spawn_error: u8[..200] = [];
+var _signal_fd: i32 = -1;
+var _spawn_error: u8[..200] = [];
 
 // Starts `n` workers, each running `worker(cfg, index)`. `worker` is a thread_fn with the signature
 // (cfg: Config, index: i64), passed last:
@@ -171,8 +171,8 @@ var router_spawn_error: u8[..200] = [];
 // plain socket, so a port held by another process is an error and not a silently shared port (RT-1d).
 // (Message pipes per worker join here in M4.) Returns the thread ids.
 fn spawn<W>(cfg: Config, n: i64) -> i64[>..] {
-    router_signal_fd = router_signals_block_and_open();
-    router_probe_listeners(cfg);
+    _signal_fd = c_signals_open();
+    _probe_listeners(cfg);
     var ids: i64[>..] = [];
     for i in n { ids.push(thread_spawn(W, cfg, i)); }
     return ids;
@@ -194,5 +194,5 @@ fn post(m: Message) {}                                                          
 // (RT-8c). The drain itself arrives in M4: for now it returns, which ends the process. Call it from
 // main, after spawn.
 fn wait_for_signal_then_drain(deadline_ms: i64) {
-    if router_signal_fd >= 0 { router_signal_wait(router_signal_fd); }
+    if _signal_fd >= 0 { c_signal_wait(_signal_fd); }
 }
