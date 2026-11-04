@@ -14,8 +14,9 @@ enum Hello {                                   // [verify] ADT syntax
     Invalid,                    // a TLS record that breaks the format (lengths, types, sizes)
 }
 
-fn parse_hello(bytes: const u8[:]) -> Hello
-fn parse_hello(bytes: const u8[:], scratch: u8[:]) -> Hello   // for ClientHellos split over records
+fn parse_hello(bytes: const u8[:], scratch: u8[:]) -> Hello   // one form only (Charlie, 2026-11-04):
+                                                               // a split ClientHello always needs scratch,
+                                                               // so a scratch-less form would be a trap
 ```
 
 - **Input is whatever has arrived**, from byte 0 of the connection. The parser never consumes or
@@ -32,6 +33,11 @@ fn parse_hello(bytes: const u8[:], scratch: u8[:]) -> Hello   // for ClientHello
   longer than 253 or with bytes outside `[a-z0-9.-]` after lowercasing → `Invalid` (RT-3e).
 - **Matching** (separate, `fn match_sni(routes, name) -> u16?`): exact first, then the longest
   `SniSuffix`, then `NoSni`/`Any` rows, in config order within each kind.
+
+**Settled at the first red gate (2026-11-04):** empty input is `NeedMore` (total ≥ 1); any first
+byte other than `0x16` is `NotTls` (alerts and SSLv2 hellos included); `NeedMore.total` must exceed
+the bytes given and not exceed the full record, but needn't be exact; an IPv4 literal passes the
+name rule (RFC 6066 forbids it, clients don't send it, and it simply won't match a route).
 
 ## Test vectors (all required, test file `tests/sni_test.goose`)
 
