@@ -77,6 +77,8 @@ root struct Worker {
     _free_buffers: i32[>..<] = [],
     _waiting_reads: u64[>..] = [],         // reads waiting for a buffer, oldest first from _waiting_reads_head
     _waiting_reads_head: i64 = 0,
+    _inspect_buffer: u8[32768] = [0; 32768],     // where a ClientHello is peeked at: one per worker, one inspect at a time
+    _inspect_scratch: u8[16384] = [0; 16384],    // where parse_hello reassembles a hello split over records
     _listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
 }
 
@@ -113,6 +115,7 @@ fn start(w: Worker&, cfg: Config, index: i64) -> bool {
 fn serve<F>(w: Worker&) {
     var events: c_EpollEvent[256] = [c_EpollEvent { 0, 0 }; 256];
     var last_tick: i64 = 0;
+    var last_sweep: i64 = 0;
     loop {
         let n = c_epoll_wait(w._epoll_fd, events[0], 256, 100);
         if n < 0 {
@@ -122,6 +125,10 @@ fn serve<F>(w: Worker&) {
         }
         let now = c_boottime_ms();
         _resume_paused_listeners(w, now);
+        if now - last_sweep >= 250 {
+            last_sweep = now;
+            _sweep_timeouts(w, now);
+        }
         if now - last_tick >= 100 {
             last_tick = now;
             let tick: Event = Event.Tick { now_ms: now };

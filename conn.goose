@@ -20,6 +20,7 @@ import .route;
 import .sni;
 import os;
 
+let _STATE_INSPECTING: u8 = 3;       // an inspect: Sni listener: waiting for the ClientHello, which stays queued in the kernel
 let _STATE_CONNECTING: u8 = 1;       // the connect to the server is in progress; the client is not read yet
 let _STATE_FORWARDING: u8 = 2;
 
@@ -47,6 +48,12 @@ struct _ConnectionSlot {
     server_mask: u32,
     listener: u16,
     user: u32,
+    started_ms: i64,             // when the connection was accepted (inspect timeout)
+    inspect_seen: i32,           // bytes of the hello seen at the last peek
+    rcvlowat_raised: bool,       // SO_RCVLOWAT was raised while waiting for a short hello; put back before forwarding
+    route_index: u16,            // the route the connection took (an index into cfg.routes)
+    first_target: u8,            // the address the built-in policy starts with
+    attempts: u8,                // addresses tried so far
     up: _Direction,                  // client to server
     down: _Direction,                // server to client
 }
@@ -259,19 +266,7 @@ fn _reject_connection(w: Worker&, fd: i32, reason: CloseReason) {
 fn _new_connection(w: Worker&, li: i64, fd: i32) {
     w._stats.accepted++;
     if w._stats.open >= w.cfg.limits.max_conns_per_worker { _reject_connection(w, fd, CloseReason.Error); return; }
-
-    // Port routing: nobody read a hello. NoSni means "no inspection result"; only Any routes can match.
-    let nothing: Hello = Hello.NoSni;
-    let route = match_route(w.cfg, w.cfg.listeners[li].id, nothing);
-    guard route else { _reject_connection(w, fd, CloseReason.ByHandler); return; }
-
-    // Only forwarding exists so far (handler mode: M3).
-    var target = Target { addrs: [] };
-    match route.action {
-        Forward f => { target = f.to; },
-        _ => { _reject_connection(w, fd, CloseReason.ByHandler); return; },
-    }
-    if target.addrs.len == 0 { _reject_connection(w, fd, CloseReason.Error); return; }
+    let inspect = w.cfg.listeners[li].inspect == Inspect.Sni;
 
     // A slot, reused when one is free.
     var i: i64 = 0;
@@ -280,47 +275,167 @@ fn _new_connection(w: Worker&, li: i64, fd: i32) {
     } else {
         i = w._connection_slots.len;
         w._connection_slots.push(_ConnectionSlot { gen: 1, live: false, state: 0, client_fd: -1, server_fd: -1, client_mask: 0,
-                                  server_mask: 0, listener: 0, user: 0, up: _Direction { .. }, down: _Direction { .. } });
+                                                   server_mask: 0, listener: 0, user: 0, started_ms: 0, inspect_seen: 0,
+                                                   rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0,
+                                                   up: _Direction { .. }, down: _Direction { .. } });
     }
     let s .= w._connection_slots[i];
     s.live = true;
-    s.state = _STATE_CONNECTING;
+    s.state = if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING };
     s.client_fd = fd;
     s.server_fd = -1;
-    s.client_mask = 0;
     s.server_mask = 0;
     s.listener = w.cfg.listeners[li].id;
     s.user = 0;
+    s.started_ms = c_boottime_ms();
+    s.inspect_seen = 0;
+    s.rcvlowat_raised = false;
+    s.route_index = 0;
+    s.first_target = 0;
+    s.attempts = 0;
     s.up = _Direction { .. };
     s.down = _Direction { .. };
     w._stats.open++;
 
-    // The built-in policy: rotate the first address from one connection to the next (retry: M3).
-    let first = w._round_robin % target.addrs.len;
-    w._round_robin++;
-    _connect_to_target(w, i, target.addrs[first].text);
+    // The client is registered at once. While a hello is awaited it is watched for input; otherwise it has no
+    // interest at all until the server answers, so a failed connect can be retried with its bytes untouched.
+    s.client_mask = if inspect { c_EPOLLIN } else { 0 };
+    let rc = c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, fd, s.client_mask, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
+    if rc < 0 { _close_connection(w, i, CloseReason.Error); return; }
+    if !inspect {
+        let nothing: Hello = Hello.NoSni;          // nobody read a hello: only Any routes can match
+        _route_and_connect(w, i, nothing);
+    }
 }
 
-fn _connect_to_target(w: Worker&, i: i64, text: const u8[:]) {
+// --- reading the ClientHello without consuming it (RT-3c, RT-3d, RT-3f, RT-3g) -------------------------------
+
+// The client sent something on an inspect: Sni listener. Peek at everything queued, ask parse_hello what it is, and
+// route. The bytes stay in the kernel, so the backend later receives them from byte 0.
+//
+// A hello that is not complete yet is NOT peeked at again on a timer, and the same short hello is never looked at
+// twice: SO_RCVLOWAT is raised to the byte count the parser asked for, so epoll reports the socket again only when
+// that many bytes are queued (or the peer ended). The inspect buffer is one per worker, because a worker handles
+// one event at a time; a connection holds nothing between events except the bytes the kernel queued.
+fn _inspect_connection(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
-    var p = _ParsedAddress { false, [0; 16], 0 };
-    if !_parse_address(text, p) { w._stats.connect_failures++; _close_connection(w, i, CloseReason.ConnectFailed); return; }
-    let sfd = c_connect_start(p.v6, p.ip, p.port);
-    if sfd < 0 { w._stats.connect_failures++; _close_connection(w, i, CloseReason.ConnectFailed); return; }
-    s.server_fd = sfd;
-    // The client is registered with no interest: nothing of it is read before the server answers, so a
-    // failed connect can still be retried with the client's bytes untouched (RT-4c).
-    c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, s.client_fd, 0, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
-    s.server_mask = c_EPOLLOUT;
-    c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, sfd, s.server_mask, _pack_event_data(_EVENT_KIND_SERVER, i, s.gen));
+    let n = c_peek(s.client_fd, w._inspect_buffer[0], w._inspect_buffer.len);
+    if n == 0 { _close_connection(w, i, CloseReason.PeerClosed); return; }          // ended before any hello
+    if n < 0 {
+        if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) { return; }
+        _close_connection(w, i, CloseReason.PeerReset);
+        return;
+    }
+    // Woken with no new bytes: with SO_RCVLOWAT raised the only thing that wakes us is the peer ending.
+    if n <= s.inspect_seen { _close_connection(w, i, CloseReason.PeerClosed); return; }
+    s.inspect_seen = n as i32;
+
+    let hello = parse_hello(w._inspect_buffer[..n], w._inspect_scratch);
+    match hello {
+        NeedMore more => {
+            if more.total > w._inspect_buffer.len { _close_connection(w, i, CloseReason.InvalidHello); return; }
+            c_set_rcvlowat(s.client_fd, more.total as i32);
+            s.rcvlowat_raised = true;
+            return;
+        },
+        Invalid => { _close_connection(w, i, CloseReason.InvalidHello); return; },
+        _ => {},
+    }
+    _route_and_connect(w, i, hello);
+}
+
+// Closes the connections that have waited too long for their ClientHello. Called every 250 ms (design/03 section 5);
+// there is no timer per connection.
+fn _sweep_timeouts(w: Worker&, now: i64) {
+    let inspect_limit = w.cfg.limits.inspect_timeout_ms;
+    for i in w._connection_slots.len {
+        let s .= w._connection_slots[i];
+        if s.live && s.state == _STATE_INSPECTING && now - s.started_ms >= inspect_limit {
+            _close_connection(w, i, CloseReason.InspectTimeout);
+        }
+    }
+}
+
+// --- choosing the target and connecting, with retry (RT-4c, RT-4d) -----------------------------------------------
+
+// The connection's first bytes are `hello` (NoSni when nobody looked): find its route and start connecting.
+fn _route_and_connect(w: Worker&, i: i64, hello: Hello) {
+    let s .= w._connection_slots[i];
+    let route = match_route(w.cfg, s.listener, hello);
+    guard route else { _close_connection(w, i, CloseReason.ByHandler); return; }
+    s.route_index = w.cfg.routes.index_of(route) as u16;
+
+    // Only forwarding exists so far (handler mode: M3 group C).
+    var count = 0;
+    match route.action {
+        Forward f => { count = f.to.addrs.len; },
+        _ => {},
+    }
+    if count == 0 { _close_connection(w, i, CloseReason.ByHandler); return; }
+
+    // The built-in policy: connection k starts at address k mod n and moves on, wrapping, after each failure.
+    s.first_target = (w._round_robin % count) as u8;
+    w._round_robin++;
+    s.attempts = 0;
+
+    // Done with the hello: the client is left alone until the server answers, and its low-water mark goes back to 1.
+    if s.rcvlowat_raised { c_set_rcvlowat(s.client_fd, 1); s.rcvlowat_raised = false; }
+    if s.client_mask != 0 {
+        c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, 0, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
+        s.client_mask = 0;
+    }
+    s.state = _STATE_CONNECTING;
+    _attempt_connect(w, i);
+}
+
+fn _target_of(w: Worker&, s: _ConnectionSlot&) -> Target {
+    var target = Target { addrs: [] };
+    match w.cfg.routes[s.route_index as i64].action {
+        Forward f => { target = f.to; },
+        _ => {},
+    }
+    return target;
+}
+
+// A connect that failed: count it, and count a retry when another address is still to be tried.
+fn _count_connect_failure(w: Worker&, attempts: i64, addresses: i64) {
+    w._stats.connect_failures++;
+    if attempts < addresses { w._stats.retries++; }
+}
+
+// Starts a connect to the next address not yet tried, or closes the connection when every address has failed. An
+// address that fails at once is counted and the next is tried in the same call; one that is merely in progress ends
+// the call and _connect_finished decides later.
+fn _attempt_connect(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    let target = _target_of(w, s);
+    let count = target.addrs.len;
+    loop {
+        if s.attempts >= count { _close_connection(w, i, CloseReason.ConnectFailed); return; }
+        let index = (s.first_target + s.attempts) % count;
+        s.attempts++;
+        var p = _ParsedAddress { false, [0; 16], 0 };
+        var sfd: i32 = -1;
+        if _parse_address(target.addrs[index].text, p) { sfd = c_connect_start(p.v6, p.ip, p.port); }
+        if sfd >= 0 {
+            s.server_fd = sfd;
+            s.server_mask = c_EPOLLOUT;
+            c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, sfd, s.server_mask, _pack_event_data(_EVENT_KIND_SERVER, i, s.gen));
+            return;
+        }
+        _count_connect_failure(w, s.attempts, count);
+    }
 }
 
 fn _connect_finished(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
     let err = c_connect_result(s.server_fd);
     if err != 0 {
-        w._stats.connect_failures++;
-        _close_connection(w, i, CloseReason.ConnectFailed);
+        c_close(s.server_fd);                              // closing removes it from epoll
+        s.server_fd = -1;
+        s.server_mask = 0;
+        _count_connect_failure(w, s.attempts, _target_of(w, s).addrs.len);
+        _attempt_connect(w, i);                            // the next address, or close
         return;
     }
     s.state = _STATE_FORWARDING;
@@ -441,6 +556,11 @@ fn _dispatch_event(w: Worker&, data: u64, events: u32) {
     if !s.live || s.gen != gen { w._stats.stale_events++; return; }
 
     let failed = (events & (c_EPOLLERR | c_EPOLLHUP)) != 0;
+    if s.state == _STATE_INSPECTING {
+        if (events & c_EPOLLERR) != 0 { _close_connection(w, slot, CloseReason.PeerReset); return; }
+        if kind == _EVENT_KIND_CLIENT { _inspect_connection(w, slot); }           // input, or the peer ended
+        return;
+    }
     if s.state == _STATE_CONNECTING {
         if kind == _EVENT_KIND_SERVER { _connect_finished(w, slot); }
         else if failed { _close_connection(w, slot, CloseReason.PeerReset); }

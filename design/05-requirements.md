@@ -31,11 +31,11 @@ Columns: id · behaviour · priority · test · status.
 |---|---|---|---|---|
 | RT-3a | `Match.Any` routes every connection on a listener (port routing) | v1 | `route_test` | green |
 | RT-3b | SNI routing: exact (case-insensitive, trailing dot ignored), then longest suffix, then `NoSni`, then `Any`; first in config order within a kind | v1 | `route_test` | green |
-| RT-3c | The backend of a forwarded SNI connection receives the client's bytes from byte 0, unchanged (ClientHello not consumed) | v1 | `sni_forward_test` | red (awaiting approval) |
-| RT-3d | A client that sends nothing within `inspect_timeout_ms` is closed | v1 | `sni_forward_test` | red (awaiting approval) |
+| RT-3c | The backend of a forwarded SNI connection receives the client's bytes from byte 0, unchanged (ClientHello not consumed) | v1 | `sni_forward_test` | green |
+| RT-3d | A client that sends nothing within `inspect_timeout_ms` is closed | v1 | `sni_forward_test` | green |
 | RT-3e | The parser passes vectors S1–S12 (doc 04) | v1 | `sni_test` | green |
-| RT-3f | A ClientHello over 16 KB is closed, not buffered | v1 | `sni_test`, `route_test`, `sni_forward_test` | sni and route halves green; engine half red (awaiting approval) |
-| RT-3g | A non-TLS client on an `inspect: Sni` listener is routed after its first byte (no wait) | v1 | `route_test`, `sni_forward_test` | route half green; engine half red (awaiting approval) |
+| RT-3f | A ClientHello over 16 KB is closed, not buffered | v1 | `sni_test`, `route_test`, `sni_forward_test` | green (sni, route and engine halves) |
+| RT-3g | A non-TLS client on an `inspect: Sni` listener is routed after its first byte (no wait) | v1 | `route_test`, `sni_forward_test` | green (route and engine halves) |
 
 ## RT-4 Forwarding
 
@@ -43,8 +43,8 @@ Columns: id · behaviour · priority · test · status.
 |---|---|---|---|---|
 | RT-4a | Bytes are forwarded both ways exactly (64 clients × 10 MB random, checksums match) | v1 | `forward_test` | done |
 | RT-4b | Half-close: client shuts down writing → backend sees EOF, and the backend's remaining reply still reaches the client; and the reverse | v1 | `forward_test` | done |
-| RT-4c | A refused or timed-out connect is retried on the next target address **before any client byte is consumed**, and the client sees a normal reply | v1 | `retry_test` | red (awaiting approval) |
-| RT-4d | When every target fails, the client connection is closed and `connect_failed` counted | v1 | `retry_test` | red (awaiting approval) |
+| RT-4c | A refused or timed-out connect is retried on the next target address **before any client byte is consumed**, and the client sees a normal reply | v1 | `retry_test` | green (refused half; timed-out half in M4) |
+| RT-4d | When every target fails, the client connection is closed and `connect_failed` counted | v1 | `retry_test` | green |
 | RT-4e | `forward(c, target)` from handler mode works only before any byte was consumed; afterwards it is refused | v1 | `handler_test` | design |
 | RT-4f | Throughput and p99 latency within 10% of the C proxy's copy engine on the same host (`bench/`) | v2 | `bench/compare.sh` | design |
 | RT-4g | splice forwarding with a pipe pool; same tests as RT-4a/b pass | v2 | `forward_test --splice` | design |

@@ -159,3 +159,28 @@ benchmarks, so tcprouter does not carry a second engine.
   the same pending connection again at once and the loop would spin at 100% of a core (measured: it did). The clients
   wait in the kernel's backlog and are served when descriptors come back. A client that left before `accept`
   (ECONNABORTED, EPROTO) is skipped. A failed outgoing connect (also EMFILE) closes that connection as ConnectFailed.
+
+## 12. As built: inspection and retry (M3 group B)
+
+- **The ClientHello is peeked, never read.** A connection on an `inspect: Sni` listener starts `Inspecting`, watched
+  for input. On input the worker `MSG_PEEK`s everything queued (up to 32 KB) into one per-worker inspect buffer and
+  asks `parse_hello`. The bytes stay in the kernel, so the backend receives them from byte 0 (RT-3c).
+- **One inspect at a time per worker.** The inspect buffer (32 KB) and the reassembly scratch (16 KB) are fields of the
+  worker, not of a connection: the worker handles one event at a time, so one pair is enough and a connection holds
+  nothing between events but the bytes the kernel queued. 500 connections each holding 1200 bytes of a half-sent hello
+  grew RSS by 36 kB (RT-3f).
+- **A short hello is never peeked again on a timer, nor twice.** `NeedMore{total}` raises the socket's `SO_RCVLOWAT` to
+  `total`: with level-triggered epoll the socket is reported readable again only when that many bytes are queued, or the
+  peer ends. A wake-up with no new bytes can therefore only be the peer ending, and the connection is closed. The
+  low-water mark goes back to 1 before forwarding. (The design sketch said edge-triggered; the engine is
+  level-triggered, and the low-water mark gives the same "wait for the next input".)
+- **Invalid, or a `total` past the inspect buffer, closes the connection as `InvalidHello`** at once, from the record
+  header if that is enough (a record over 16384 bytes). A non-TLS first byte is `NotTls`: routed by a `NoSni` or `Any`
+  row after that one byte, without waiting (RT-3g).
+- **Timeouts are one sweep, not a timer per connection.** Every 250 ms the loop walks the slot table and closes the
+  connections that have waited longer than `inspect_timeout_ms` since accept (`InspectTimeout`); measured close times for
+  a 1 s limit are 1.0-1.25 s (RT-3d). The connect timeout joins the same sweep in M4.
+- **Retry.** A connection starts at address `k mod n` (k counts routed connections) and, after each failure, tries the
+  next address, wrapping, until each has been tried once; then it is closed as `ConnectFailed`. The client has no
+  interest registered until the server answers, so none of its bytes are consumed before a connect succeeds (RT-4c).
+  `connect_failures` counts every failed attempt and `retries` the failures that were followed by another attempt.

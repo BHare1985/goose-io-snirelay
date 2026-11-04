@@ -141,6 +141,18 @@ int64_t c_send(int32_t fd, const uint8_t *buf, int64_t len) {
     return n < 0 ? -errno : n;
 }
 
+/* Like c_recv but the bytes stay queued in the socket (MSG_PEEK): the ClientHello is read without being consumed. */
+int64_t c_peek(int32_t fd, uint8_t *buf, int64_t len) {
+    ssize_t n = recv(fd, buf, (size_t)len, MSG_PEEK);
+    return n < 0 ? -errno : n;
+}
+
+/* Wake the socket's readers only when at least `bytes` are queued (or the peer ends): how a short ClientHello waits
+   for the rest without a timer and without being read again and again. 1 is the default. Returns 0 or -errno. */
+int32_t c_set_rcvlowat(int32_t fd, int32_t bytes) {
+    return setsockopt(fd, SOL_SOCKET, SO_RCVLOWAT, &bytes, sizeof bytes) < 0 ? -errno : 0;
+}
+
 void c_shutdown_wr(int32_t fd) { shutdown(fd, SHUT_WR); }
 void c_close(int32_t fd) { close(fd); }
 

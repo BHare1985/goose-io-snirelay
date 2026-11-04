@@ -33,6 +33,8 @@ extern fn c_connect_start(v6: bool, ip: const u8[16]&, port: u16) -> i32;
 extern fn c_connect_result(fd: i32) -> i32;
 extern fn c_recv(fd: i32, buf: u8&, len: i64) -> i64;
 extern fn c_send(fd: i32, buf: const u8&, len: i64) -> i64;
+extern fn c_peek(fd: i32, buf: u8&, len: i64) -> i64;
+extern fn c_set_rcvlowat(fd: i32, bytes: i32) -> i32;
 extern fn c_shutdown_wr(fd: i32);
 extern fn c_close(fd: i32);
 extern fn c_reset(fd: i32);
