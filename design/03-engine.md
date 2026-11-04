@@ -99,13 +99,16 @@ active slots; not before.
 ## 7. Messages to workers
 
 Goose's typed queues are shared per type: a `qput` reaches one worker, not all [V goose-kb].
-Broadcast needs per-worker addressing. Proposal [R, verify O-2]:
+Broadcast needs per-worker addressing. Verified [V, M0 O-2]:
 
-- Each worker owns a **message pipe** (`pipe2`), registered in its epoll. `tcprouter::post(m)`
-  writes the flat message struct to every worker's pipe. Messages are small and fixed size, so a
-  pipe write is atomic (≤ `PIPE_BUF`).
-- Replies (stats) go back through one shared typed queue, tagged with worker index.
-- If Goose offers per-thread queues, use them instead; the public `post` doesn't change.
+- Each worker owns a **message pipe** (`pipe2`), registered in its epoll. `spawn(cfg, n, worker)`
+  creates all `n` pipes **before** spawning (globals set in `main` are copied into each worker at
+  spawn), so `start()` finds its own read end in that copy by its index, and `post(m)` writes the flat
+  message to every write end. Messages are small and fixed size (≤ `PIPE_BUF`), so one write is
+  atomic. 4 workers each received a broadcast exactly once.
+- A typed queue is the opposite: one `qput`, one receiver. It carries replies (stats) back to one
+  collector, tagged with the worker index.
+- Goose has no per-thread queue (the queue is selected by type alone), so pipes it is.
 
 ## 8. Drain
 

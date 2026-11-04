@@ -1,0 +1,70 @@
+// A tiny HTTP/1.1 server on handler mode: every request gets "hello". Keep-alive works, and a
+// request may arrive in pieces. (Plain HTTP; TLS termination is the application's business.)
+//
+//     goose build examples/http_hello.goose && ./examples/http_hello
+//
+// Your per-connection state lives in your own slot_pool. On Opened you allocate a Session and tell
+// tcprouter its index with set_user; every later event carries that index back.
+import tcprouter from "..";
+import slot_pool;
+import std;
+
+struct Session { inbox: u8[..2048], live: bool }
+
+let RESPONSE = "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nContent-Type: text/plain\r\n\r\nhello\n";
+
+// One request head ends at a blank line. Answers every complete head in the buffer.
+// (A function of its own: a `return` inside the serve block would leave `worker`, not the block.)
+fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32,
+           bytes: const u8[:]) {
+    // The id comes back from the engine; check it anyway before indexing.
+    if user >= sessions.items.len { return; }
+    var s .= sessions.items[user];
+    if !s.live { return; }
+    if s.inbox.len + bytes.len > s.inbox.cap {            // request head too large
+        tcprouter::reset(w, conn);
+        return;
+    }
+    s.inbox.append(bytes);
+    loop {
+        let end = find(s.inbox, "\r\n\r\n");
+        if end < 0 { break; }
+        tcprouter::send(w, conn, RESPONSE);
+        let used = end + 4;
+        let rest = s.inbox.len - used;
+        for k in rest { s.inbox[k] = s.inbox[used + k]; }
+        s.inbox.pop_n(used);
+    }
+}
+
+thread_fn worker(cfg: tcprouter::Config, index: i64) {
+    var sessions = slot_pool<Session> {};
+    var w = tcprouter::Worker { .. };
+    if !tcprouter::start(w, cfg, index) { print(w.error); return; }
+    tcprouter::serve(w) { w, ev =>
+        match ev {
+            Opened o => {
+                let i = sessions.alloc_index(Session { inbox: [], live: true });
+                tcprouter::set_user(w, o.conn, i as u32);
+            },
+            Data d => { on_data(w, sessions, d.conn, d.user, d.bytes); },
+            Closed c => {
+                if c.user < sessions.items.len {
+                    sessions.items[c.user].live = false;
+                    sessions.free(c.user);
+                }
+            },
+            _ => {},
+        }
+    };
+}
+
+fn main() {
+    var cfg = tcprouter::Config { .. };
+    cfg.listeners.push(tcprouter::Listener { id: 1, addr: tcprouter::addr("0.0.0.0:8080") });
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Handle { tag: 1 }));
+    var problems: u8[>..] = [];
+    if !tcprouter::check(cfg, problems) { print(problems); exit(2); }
+    tcprouter::spawn(cfg, tcprouter::cpu_count(), worker);
+    tcprouter::wait_for_signal_then_drain(30000);
+}
