@@ -18,6 +18,8 @@ let ROUTER_EPOLL_CTL_MOD: i32 = 3;
 let ROUTER_ERRNO_AGAIN: i32 = 11;
 let ROUTER_ERRNO_INTERRUPTED: i32 = 4;
 let ROUTER_ERRNO_ADDRESS_IN_USE: i32 = 98;
+let ROUTER_ERRNO_CONNECTION_ABORTED: i32 = 103;
+let ROUTER_ERRNO_PROTOCOL: i32 = 71;
 
 extern fn router_epoll_create() -> i32 = "c_epoll_create";
 extern fn router_epoll_control(ep: i32, op: i32, fd: i32, events: u32, data: u64) -> i32 = "c_epoll_ctl";

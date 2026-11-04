@@ -154,3 +154,8 @@ benchmarks, so tcprouter does not carry a second engine.
   except the 12-byte epoll event, which `_Static_assert` and a unit test pin.
 - **Measured:** 58 bytes of RSS per idle connection (RT-5b limit 512); 1,000 idle connections +64 kB; a backend that never
   reads stops a 1 GB offer at about 6.7 MB with no RSS growth (RT-5c).
+- **Running out of resources (RT-1e).** When `accept` fails with EMFILE, ENFILE, ENOMEM or ENOBUFS the worker counts
+  `accept_failures` and takes that listener out of epoll for 100 ms. Without that, level-triggered epoll would report
+  the same pending connection again at once and the loop would spin at 100% of a core (measured: it did). The clients
+  wait in the kernel's backlog and are served when descriptors come back. A client that left before `accept`
+  (ECONNABORTED, EPROTO) is skipped. A failed outgoing connect (also EMFILE) closes that connection as ConnectFailed.

@@ -214,11 +214,40 @@ fn router_close_connection(w: Worker&, i: i64, reason: CloseReason) {
 
 // --- accept and connect -------------------------------------------------------------------------------------------
 
+// How long a listener is left alone after accept failed for lack of a resource (descriptors, memory, buffers).
+let ROUTER_ACCEPT_PAUSE_MILLISECONDS: i64 = 100;
+
 fn router_accept_ready_connections(w: Worker&, li: i64) {
     for k in 64 {                                        // a bounded batch per wakeup keeps the loop fair
         let fd = router_socket_accept(w.router_listen_fds[li]);
-        if fd < 0 { return; }                            // -EAGAIN: none waiting (other errors: M3, RT-1e)
-        router_new_connection(w, li, fd);
+        if fd >= 0 { router_new_connection(w, li, fd); continue; }
+        let error = -fd;
+        if error == ROUTER_ERRNO_AGAIN || error == ROUTER_ERRNO_INTERRUPTED { return; }       // nobody is waiting
+        if error == ROUTER_ERRNO_CONNECTION_ABORTED || error == ROUTER_ERRNO_PROTOCOL { continue; }   // that client left
+        // Out of descriptors, memory or socket buffers (EMFILE, ENFILE, ENOMEM, ENOBUFS...): nothing we do right now
+        // can fix it, and epoll is level-triggered, so the pending connection would wake us again at once and we
+        // would spin. Leave this listener out of epoll for a moment; the clients wait in the kernel's backlog
+        // and are served when descriptors come back (RT-1e).
+        w.router_stats.accept_failures++;
+        router_pause_listener(w, li);
+        return;
+    }
+}
+
+fn router_pause_listener(w: Worker&, li: i64) {
+    router_epoll_control(w.router_epoll_fd, ROUTER_EPOLL_CTL_MOD, w.router_listen_fds[li], 0,
+                         router_pack_event_data(ROUTER_EVENT_KIND_LISTENER, li, 0));
+    w.router_listener_resume_at[li] = router_boottime_milliseconds() + ROUTER_ACCEPT_PAUSE_MILLISECONDS;
+}
+
+// Puts back into epoll the listeners whose pause is over. Called once per pass of the loop.
+fn router_resume_paused_listeners(w: Worker&, now: i64) {
+    for li in w.cfg.listeners.len {
+        if w.router_listener_resume_at[li] != 0 && now >= w.router_listener_resume_at[li] {
+            w.router_listener_resume_at[li] = 0;
+            router_epoll_control(w.router_epoll_fd, ROUTER_EPOLL_CTL_MOD, w.router_listen_fds[li], ROUTER_EPOLL_IN,
+                                 router_pack_event_data(ROUTER_EVENT_KIND_LISTENER, li, 0));
+        }
     }
 }
 
@@ -399,10 +428,12 @@ fn router_dispatch_event(w: Worker&, data: u64, events: u32) {
     let gen = ((data >> 8) & 0xffffff) as u32;
     let slot = (data >> 32) as i64;
 
+    // The kind comes from the kernel's event data too: anything but the three we hand out is bad (RT-2c).
     if kind == ROUTER_EVENT_KIND_LISTENER {
         if slot < w.cfg.listeners.len { router_accept_ready_connections(w, slot); } else { w.router_stats.bad_events++; }
         return;
     }
+    if kind != ROUTER_EVENT_KIND_CLIENT && kind != ROUTER_EVENT_KIND_SERVER { w.router_stats.bad_events++; return; }
     // A slot number comes from the kernel's event data: check it, never trust it (RT-2c). A generation that
     // no longer matches is an event for a connection that has closed (RT-2b).
     if slot >= w.router_connection_slots.len { w.router_stats.bad_events++; return; }

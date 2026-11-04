@@ -47,7 +47,8 @@ struct Stats {
     buffers_in_use: i64,      // buffers borrowed right now
     buffer_waits: i64,        // times a read had to wait for a free buffer
     stale_events: i64,        // events for a connection that was already closed and its slot reused (RT-2b)
-    bad_events: i64,          // events whose slot index was out of range (RT-2c)
+    bad_events: i64,          // events whose slot index or kind was out of range (RT-2c)
+    accept_failures: i64,     // accepts that failed for lack of a resource; the listener rests briefly (RT-1e)
 }
 
 // A snapshot of this worker's counters. Call it on the worker's thread, e.g. from a Tick.
@@ -75,6 +76,7 @@ root struct Worker {
     router_free_buffers: i32[>..<] = [],
     router_waiting_reads: u64[>..] = [],         // reads waiting for a buffer, oldest first from router_waiting_reads_head
     router_waiting_reads_head: i64 = 0,
+    router_listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
 }
 
 // Binds this worker's listeners (SO_REUSEPORT) and prepares its tables. Returns false and fills
@@ -118,6 +120,7 @@ fn serve<F>(w: Worker&) {
             for k in n { router_dispatch_event(w, events[k].data, events[k].events); }
         }
         let now = router_boottime_milliseconds();
+        router_resume_paused_listeners(w, now);
         if now - last_tick >= 100 {
             last_tick = now;
             let tick: Event = Event.Tick { now_ms: now };
