@@ -23,7 +23,7 @@ fn check(cfg: const Config&, problems: u8[>..]&) -> bool {
                 break;
             }
         }
-        tr_check_addr(problems, str("listeners[", i, "].addr"), l.addr);
+        c_check_addr(problems, str("listeners[", i, "].addr"), l.addr);
     }
 
     for i in cfg.routes.len {
@@ -39,17 +39,17 @@ fn check(cfg: const Config&, problems: u8[>..]&) -> bool {
             Any => {},
             Sni s => {
                 if s.too_long { format(problems, "routes[", i, "].on: name longer than 253 bytes\n"); }
-                tr_check_sni_listener(problems, cfg, i, at, "Sni");
+                c_check_sni_listener(problems, cfg, i, at, "Sni");
             },
             SniSuffix s => {
                 if s.too_long { format(problems, "routes[", i, "].on: name longer than 253 bytes\n"); }
-                tr_check_sni_listener(problems, cfg, i, at, "SniSuffix");
+                c_check_sni_listener(problems, cfg, i, at, "SniSuffix");
             },
-            NoSni => { tr_check_sni_listener(problems, cfg, i, at, "NoSni"); },
+            NoSni => { c_check_sni_listener(problems, cfg, i, at, "NoSni"); },
         }
 
         match r.action {
-            Forward f => { tr_check_target(problems, i, f.to); },
+            Forward f => { c_check_target(problems, i, f.to); },
             _ => {},
         }
     }
@@ -57,33 +57,33 @@ fn check(cfg: const Config&, problems: u8[>..]&) -> bool {
 }
 
 // Internal: an SNI row needs its listener to read the ClientHello.
-fn tr_check_sni_listener(problems: u8[>..]&, cfg: const Config&, route: i64, listener_at: i64, kind: const u8[:]) {
+fn c_check_sni_listener(problems: u8[>..]&, cfg: const Config&, route: i64, listener_at: i64, kind: const u8[:]) {
     if listener_at >= 0 && cfg.listeners[listener_at].inspect != Inspect.Sni {
         format(problems, "routes[", route, "].on: a ", kind, " row needs listener ",
                cfg.listeners[listener_at].id, " to have inspect: Sni\n");
     }
 }
 
-fn tr_check_addr(problems: u8[>..]&, path: const u8[:], a: Addr) {
+fn c_check_addr(problems: u8[>..]&, path: const u8[:], a: Addr) {
     if a.too_long {
         format(problems, path, ": address text is longer than 64 bytes\n");
         return;
     }
-    var parsed = tr_Parsed { false, [0; 16], 0 };
-    if !tr_parse_addr(a.text, parsed) {
+    var parsed = c_Parsed { false, [0; 16], 0 };
+    if !c_parse_addr(a.text, parsed) {
         format(problems, path, ": bad address '", a.text, "' (want ip:port or [ipv6]:port; no host names)\n");
     }
 }
 
-fn tr_check_target(problems: u8[>..]&, route: i64, t: Target) {
+fn c_check_target(problems: u8[>..]&, route: i64, t: Target) {
     let path = str("routes[", route, "].action");
     if t.addrs.len == 0 && !t.too_many { format(problems, path, ": the target has no addresses\n"); }
     if t.too_many { format(problems, path, ": the target has more than 8 addresses\n"); }
     for k in t.addrs.len {
-        var parsed = tr_Parsed { false, [0; 16], 0 };
+        var parsed = c_Parsed { false, [0; 16], 0 };
         if t.addrs[k].too_long {
             format(problems, path, ": target address ", k, " is longer than 64 bytes\n");
-        } else if !tr_parse_addr(t.addrs[k].text, parsed) {
+        } else if !c_parse_addr(t.addrs[k].text, parsed) {
             format(problems, path, ": bad target address ", k, " '", t.addrs[k].text, "'\n");
         }
     }

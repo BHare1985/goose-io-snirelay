@@ -31,20 +31,20 @@ fn match_route(cfg: const Config&, listener: u16, hello: Hello) -> const Route? 
     if !routable { return null; }
 
     // Without inspection nobody read a hello: only Any rows can match (B3).
-    if inspect == Inspect.None { return tr_first_any(cfg, listener); }
+    if inspect == Inspect.None { return c_first_any(cfg, listener); }
 
     return match hello {
-        Found f => tr_route_for_name(cfg, listener, f.name),
-        _ => tr_route_without_name(cfg, listener),      // NoSni or NotTls
+        Found f => c_route_for_name(cfg, listener, f.name),
+        _ => c_route_without_name(cfg, listener),      // NoSni or NotTls
     };
 }
 
 // Internal: a client with a name: exact, then the longest suffix, then Any.
-fn tr_route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -> const Route? {
+fn c_route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -> const Route? {
     for &r in cfg.routes {
         if r.listener != listener { continue; }
         match r.on {
-            Sni s => { if tr_same_name(s.name, name) { return r; } },
+            Sni s => { if c_same_name(s.name, name) { return r; } },
             _ => {},
         }
     }
@@ -54,8 +54,8 @@ fn tr_route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -> co
         if r.listener != listener { continue; }
         match r.on {
             SniSuffix s => {
-                let suffix = tr_trim_dot(s.name);
-                if suffix.len > best_len && tr_below(name, suffix) {
+                let suffix = c_trim_dot(s.name);
+                if suffix.len > best_len && c_below(name, suffix) {
                     best .= r;
                     best_len = suffix.len;
                 }
@@ -64,11 +64,11 @@ fn tr_route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -> co
         }
     }
     if best { return best; }
-    return tr_first_any(cfg, listener);
+    return c_first_any(cfg, listener);
 }
 
 // Internal: a client with no name, or not TLS at all: a NoSni row, then Any.
-fn tr_route_without_name(cfg: const Config&, listener: u16) -> const Route? {
+fn c_route_without_name(cfg: const Config&, listener: u16) -> const Route? {
     for &r in cfg.routes {
         if r.listener != listener { continue; }
         match r.on {
@@ -76,10 +76,10 @@ fn tr_route_without_name(cfg: const Config&, listener: u16) -> const Route? {
             _ => {},
         }
     }
-    return tr_first_any(cfg, listener);
+    return c_first_any(cfg, listener);
 }
 
-fn tr_first_any(cfg: const Config&, listener: u16) -> const Route? {
+fn c_first_any(cfg: const Config&, listener: u16) -> const Route? {
     for &r in cfg.routes {
         if r.listener != listener { continue; }
         match r.on {
@@ -91,29 +91,29 @@ fn tr_first_any(cfg: const Config&, listener: u16) -> const Route? {
 }
 
 // Internal: `name` without one trailing dot.
-fn tr_trim_dot(name: const u8[:]) -> const u8[:] {
+fn c_trim_dot(name: const u8[:]) -> const u8[:] {
     if name.len > 0 && name[name.len - 1] == '.' { return name[..name.len - 1]; }
     return name;
 }
 
-fn tr_lower(c: u8) -> u8 { return if c >= 'A' && c <= 'Z' { c + 32 } else { c }; }
+fn c_lower(c: u8) -> u8 { return if c >= 'A' && c <= 'Z' { c + 32 } else { c }; }
 
 // Internal: equal as host names: ASCII case ignored, one trailing dot ignored on either side. Empty
 // names are never equal to anything.
-fn tr_same_name(a: const u8[:], b: const u8[:]) -> bool {
-    let x = tr_trim_dot(a);
-    let y = tr_trim_dot(b);
+fn c_same_name(a: const u8[:], b: const u8[:]) -> bool {
+    let x = c_trim_dot(a);
+    let y = c_trim_dot(b);
     if x.len == 0 || x.len != y.len { return false; }
-    for i in x.len { if tr_lower(x[i]) != tr_lower(y[i]) { return false; } }
+    for i in x.len { if c_lower(x[i]) != c_lower(y[i]) { return false; } }
     return true;
 }
 
 // Internal: `name` ends in "." followed by `suffix` (so the apex itself is not below it).
-fn tr_below(name: const u8[:], suffix: const u8[:]) -> bool {
-    let n = tr_trim_dot(name);
+fn c_below(name: const u8[:], suffix: const u8[:]) -> bool {
+    let n = c_trim_dot(name);
     if suffix.len == 0 || n.len <= suffix.len + 1 { return false; }
     if n[n.len - suffix.len - 1] != '.' { return false; }
     let tail = n[n.len - suffix.len..];
-    for i in suffix.len { if tr_lower(tail[i]) != tr_lower(suffix[i]) { return false; } }
+    for i in suffix.len { if c_lower(tail[i]) != c_lower(suffix[i]) { return false; } }
     return true;
 }

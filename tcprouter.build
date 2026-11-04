@@ -1,6 +1,6 @@
-// The native part of tcprouter: one small C file (src/tr_sys.c), compiled by Goose's own C driver.
+// The native part of tcprouter: one small C file (src/c_sys.c), compiled by Goose's own C driver.
 // No cmake and no third-party C. Everything else in libc is bound directly with `extern fn`.
-c_sources = ["src/tr_sys.c"];
+c_sources = ["src/c_sys.c"];
 
 // Programs of their own (tests, examples, benchmarks) and our notes are not part of the package.
 exclude = ["tests", "examples", "bench", "design", "goose-kb"];

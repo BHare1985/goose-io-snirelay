@@ -13,7 +13,7 @@ import tcprouter from "github.com/bhare1985/tcprouter@v0";
 ```
 
 Needs Goose (tested with `goose 751794c`), `git` to fetch the package, and a C compiler: the package carries
-one small C file (`src/tr_sys.c`).
+one small C file (`src/c_sys.c`).
 
 ## Examples
 
@@ -28,8 +28,8 @@ Goose has no privacy and no nested namespaces, so the rule is by name, and it do
 | Name looks like | Meaning |
 |---|---|
 | `parse_hello`, `Config`, `Worker`, `Event`, `serve` | **Public API.** Documented in design/02 and covered by tests. |
-| `tr_parse_body`, `tr_Slot`, `tr_slots` | **Internal.** Starts with `tr_`. May change or vanish in any release; do not use. |
-| `tcprouter_sys::…` | **Internal.** The libc and C bindings (`sys.goose`, `src/tr_sys.c`). |
+| `c_parse_body`, `c_Slot`, `c_slots` | **Internal.** Starts with `c_`. May change or vanish in any release; do not use. |
+| `tcprouter_sys::…` | **Internal.** The libc and C bindings (`sys.goose`, `src/c_sys.c`). |
 
 Every file declares `namespace tcprouter;` (the bindings in `sys.goose` declare `tcprouter_sys`).
 Library code never reads files, environment variables or flags, never calls `abort` or `exit` because of

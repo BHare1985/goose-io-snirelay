@@ -6,11 +6,11 @@ import std;
 
 // An address in the form the sockets want: 4 or 16 bytes in network order, and a port.
 // Internal: the engine builds its sockaddr from this.
-struct tr_Parsed { v6: bool, ip: u8[16], port: u16 }
+struct c_Parsed { v6: bool, ip: u8[16], port: u16 }
 
 // Parses "ip:port" or "[ipv6]:port". False for anything else, including host names, a missing or
 // zero port, a port over 65535, and surrounding spaces. Never aborts.
-fn tr_parse_addr(text: const u8[:], out: tr_Parsed&) -> bool {
+fn c_parse_addr(text: const u8[:], out: c_Parsed&) -> bool {
     if text.len == 0 { return false; }
     var host: const u8[:] = text;
     var port: const u8[:] = text;
@@ -20,20 +20,20 @@ fn tr_parse_addr(text: const u8[:], out: tr_Parsed&) -> bool {
         host = text[1..close];
         port = text[close + 2..];
         out.v6 = true;
-        if !tr_parse_ipv6(host, out.ip) { return false; }
+        if !c_parse_ipv6(host, out.ip) { return false; }
     } else {
         let colon = find(text, ":");
         if colon < 0 { return false; }
         host = text[..colon];
         port = text[colon + 1..];
         out.v6 = false;
-        if !tr_parse_ipv4(host, out.ip) { return false; }
+        if !c_parse_ipv4(host, out.ip) { return false; }
     }
-    return tr_parse_port(port, out.port);
+    return c_parse_port(port, out.port);
 }
 
 // Internal: 1 to 5 decimal digits, 1..65535.
-fn tr_parse_port(text: const u8[:], out: u16&) -> bool {
+fn c_parse_port(text: const u8[:], out: u16&) -> bool {
     if text.len == 0 || text.len > 5 { return false; }
     var n = 0;
     for c in text {
@@ -46,7 +46,7 @@ fn tr_parse_port(text: const u8[:], out: u16&) -> bool {
 }
 
 // Internal: a.b.c.d, each 0..255, 1 to 3 digits, no leading zeros (they look like octal).
-fn tr_parse_ipv4(text: const u8[:], out: u8[16]&) -> bool {
+fn c_parse_ipv4(text: const u8[:], out: u8[16]&) -> bool {
     var part = 0;        // which of the four numbers
     var value = 0;
     var digits = 0;
@@ -70,7 +70,7 @@ fn tr_parse_ipv4(text: const u8[:], out: u8[16]&) -> bool {
     return part == 4;
 }
 
-fn tr_hex_value(c: u8) -> i64 {
+fn c_hex_value(c: u8) -> i64 {
     if c >= '0' && c <= '9' { return c - '0'; }
     if c >= 'a' && c <= 'f' { return c - 'a' + 10; }
     if c >= 'A' && c <= 'F' { return c - 'A' + 10; }
@@ -78,7 +78,7 @@ fn tr_hex_value(c: u8) -> i64 {
 }
 
 // Internal: colon-hex groups of 1 to 4 digits, at most one "::" standing for one or more zero groups.
-fn tr_parse_ipv6(text: const u8[:], out: u8[16]&) -> bool {
+fn c_parse_ipv6(text: const u8[:], out: u8[16]&) -> bool {
     if text.len < 2 { return false; }
     var groups: u16[8] = [0; 8];
     var head: i64 = 0;                 // groups before "::"
@@ -97,7 +97,7 @@ fn tr_parse_ipv6(text: const u8[:], out: u8[16]&) -> bool {
         var v = 0;
         var digits = 0;
         while i < text.len && text[i] != ':' {
-            let h = tr_hex_value(text[i]);
+            let h = c_hex_value(text[i]);
             if h < 0 || digits == 4 { return false; }
             v = v * 16 + h;
             digits++;

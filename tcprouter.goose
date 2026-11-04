@@ -10,7 +10,7 @@
 // internal and live in `tcprouter_sys` so that `close` and `send` never clash with the API):
 //
 //     sni.goose   the TLS ClientHello parser (design/04-sni.md)
-//     sys.goose   libc and the small C layer in src/tr_sys.c
+//     sys.goose   libc and the small C layer in src/c_sys.c
 namespace tcprouter;
 
 import .sni;

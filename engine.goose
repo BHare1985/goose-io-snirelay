@@ -52,7 +52,7 @@ struct Stats {
 
 // A snapshot of this worker's counters. Call it on the worker's thread, e.g. from a Tick.
 fn stats(w: Worker&) -> Stats {
-    return w.tr_st;
+    return w.c_st;
 }
 
 // --- the worker ---------------------------------------------------------------------------------
@@ -60,21 +60,21 @@ fn stats(w: Worker&) -> Stats {
 // One event loop and everything it owns. A root struct: create it where it lives, then start it.
 //     var w = tcprouter::Worker { .. };
 //     if !tcprouter::start(w, cfg, index) { print(w.error); return; }
-// Fields starting with `tr_` are internal (README: naming rule).
+// Fields starting with `c_` are internal (README: naming rule).
 root struct Worker {
     error: u8[..200] = [],             // why start() returned false
     index: i64 = 0,
     cfg: Config = Config { .. },       // this worker's copy of the config
-    tr_epfd: i32 = -1,
-    tr_listen_fds: i32[16] = [-1; 16], // one per cfg.listeners entry
-    tr_rr: i64 = 0,                    // rotates the first target of the built-in policy
-    tr_st: Stats = Stats { .. },
-    tr_slots: tr_Slot[>..] = [],       // one per connection, reused through tr_free_slots
-    tr_free_slots: u32[>..<] = [],
-    tr_pool: u8[>..] = [],             // buffers_per_worker buffers of buffer_size bytes, grown lazily
-    tr_free_bufs: i32[>..<] = [],
-    tr_waiters: u64[>..] = [],         // reads waiting for a buffer, oldest first from tr_waiters_head
-    tr_waiters_head: i64 = 0,
+    c_epfd: i32 = -1,
+    c_listen_fds: i32[16] = [-1; 16], // one per cfg.listeners entry
+    c_rr: i64 = 0,                    // rotates the first target of the built-in policy
+    c_st: Stats = Stats { .. },
+    c_slots: c_Slot[>..] = [],       // one per connection, reused through c_free_slots
+    c_free_slots: u32[>..<] = [],
+    c_pool: u8[>..] = [],             // buffers_per_worker buffers of buffer_size bytes, grown lazily
+    c_free_bufs: i32[>..<] = [],
+    c_waiters: u64[>..] = [],         // reads waiting for a buffer, oldest first from c_waiters_head
+    c_waiters_head: i64 = 0,
 }
 
 // Binds this worker's listeners (SO_REUSEPORT) and prepares its tables. Returns false and fills
@@ -83,22 +83,22 @@ root struct Worker {
 fn start(w: Worker&, cfg: Config, index: i64) -> bool {
     w.cfg = cfg;
     w.index = index;
-    if tr_spawn_error.len > 0 {                          // spawn() found a listener it cannot bind
-        w.error.append(tr_spawn_error);
+    if c_spawn_error.len > 0 {                          // spawn() found a listener it cannot bind
+        w.error.append(c_spawn_error);
         return false;
     }
-    w.tr_epfd = tcprouter_sys::tr_epoll_create();
-    if w.tr_epfd < 0 { return tr_fail(w, "epoll_create", "", -w.tr_epfd); }
+    w.c_epfd = tcprouter_sys::c_epoll_create();
+    if w.c_epfd < 0 { return c_fail(w, "epoll_create", "", -w.c_epfd); }
     for li in cfg.listeners.len {
-        var p = tr_Parsed { false, [0; 16], 0 };
+        var p = c_Parsed { false, [0; 16], 0 };
         let text = cfg.listeners[li].addr.text;
-        if !tr_parse_addr(text, p) { return tr_fail(w, "bad listener address", text, 22); }
-        let fd = tcprouter_sys::tr_listen(p.v6, p.ip, p.port, true, 1024);
-        if fd < 0 { return tr_fail(w, "cannot listen on", text, -fd); }
-        w.tr_listen_fds[li] = fd;
-        let rc = tcprouter_sys::tr_epoll_ctl(w.tr_epfd, tcprouter_sys::EPOLL_CTL_ADD, fd, tcprouter_sys::EPOLLIN,
-                                             tr_pack(TR_KIND_LISTENER, li, 0));
-        if rc < 0 { return tr_fail(w, "epoll_ctl", text, -rc); }
+        if !c_parse_addr(text, p) { return c_fail(w, "bad listener address", text, 22); }
+        let fd = tcprouter_sys::c_listen(p.v6, p.ip, p.port, true, 1024);
+        if fd < 0 { return c_fail(w, "cannot listen on", text, -fd); }
+        w.c_listen_fds[li] = fd;
+        let rc = tcprouter_sys::c_epoll_ctl(w.c_epfd, tcprouter_sys::EPOLL_CTL_ADD, fd, tcprouter_sys::EPOLLIN,
+                                             c_pack(C_KIND_LISTENER, li, 0));
+        if rc < 0 { return c_fail(w, "epoll_ctl", text, -rc); }
     }
     return true;
 }
@@ -111,13 +111,13 @@ fn serve<F>(w: Worker&) {
     var events: tcprouter_sys::EpollEvent[256] = [tcprouter_sys::EpollEvent { 0, 0 }; 256];
     var last_tick: i64 = 0;
     loop {
-        let n = tcprouter_sys::tr_epoll_wait(w.tr_epfd, events[0], 256, 100);
+        let n = tcprouter_sys::c_epoll_wait(w.c_epfd, events[0], 256, 100);
         if n < 0 {
-            tr_pause_ms(1);                     // an unexpected epoll error: do not spin
+            c_pause_ms(1);                     // an unexpected epoll error: do not spin
         } else {
-            for k in n { tr_dispatch(w, events[k].data, events[k].events); }
+            for k in n { c_dispatch(w, events[k].data, events[k].events); }
         }
-        let now = tcprouter_sys::tr_boottime_ms();
+        let now = tcprouter_sys::c_boottime_ms();
         if now - last_tick >= 100 {
             last_tick = now;
             let tick: Event = Event.Tick { now_ms: now };
@@ -157,8 +157,8 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool { return false; }           
 
 // --- running workers and talking to them --------------------------------------------------------
 
-var tr_signal_fd: i32 = -1;
-var tr_spawn_error: u8[..200] = [];
+var c_signal_fd: i32 = -1;
+var c_spawn_error: u8[..200] = [];
 
 // Starts `n` workers, each running `worker(cfg, index)`. `worker` is a thread_fn with the signature
 // (cfg: Config, index: i64), passed last:
@@ -168,8 +168,8 @@ var tr_spawn_error: u8[..200] = [];
 // plain socket, so a port held by another process is an error and not a silently shared port (RT-1d).
 // (Message pipes per worker join here in M4.) Returns the thread ids.
 fn spawn<W>(cfg: Config, n: i64) -> i64[>..] {
-    tr_signal_fd = tcprouter_sys::tr_signals_open();
-    tr_probe_listeners(cfg);
+    c_signal_fd = tcprouter_sys::c_signals_open();
+    c_probe_listeners(cfg);
     var ids: i64[>..] = [];
     for i in n { ids.push(thread_spawn(W, cfg, i)); }
     return ids;
@@ -191,5 +191,5 @@ fn post(m: Message) {}                                                          
 // (RT-8c). The drain itself arrives in M4: for now it returns, which ends the process. Call it from
 // main, after spawn.
 fn wait_for_signal_then_drain(deadline_ms: i64) {
-    if tr_signal_fd >= 0 { tcprouter_sys::tr_signal_wait(tr_signal_fd); }
+    if c_signal_fd >= 0 { tcprouter_sys::c_signal_wait(c_signal_fd); }
 }

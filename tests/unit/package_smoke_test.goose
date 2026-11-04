@@ -19,26 +19,26 @@ extern fn write(fd: i32, buf: const u8&, n: u64) -> i64;
 
 fn main() {
     // C layer: the clock moves forward.
-    let t0 = tcprouter_sys::tr_boottime_ms();
+    let t0 = tcprouter_sys::c_boottime_ms();
     check(t0 > 0, "CLOCK_BOOTTIME is positive");
 
-    // Layout: Goose's EpollEvent is 12 packed bytes, like tr_epoll_event in src/tr_sys.c.
+    // Layout: Goose's EpollEvent is 12 packed bytes, like c_epoll_event in src/c_sys.c.
     let one: tcprouter_sys::EpollEvent[1] = [tcprouter_sys::EpollEvent { 0, 0 }];
     check(bytes_of(one).len == 12, "EpollEvent is 12 bytes");
 
     // C layer: epoll round trip carries the 64-bit user data intact.
     var p: i32[2] = [0, 0];
     check(pipe2(p, 0) == 0, "pipe2");
-    let ep = tcprouter_sys::tr_epoll_create();
+    let ep = tcprouter_sys::c_epoll_create();
     check(ep >= 0, "epoll_create");
     let EPOLLIN: u32 = 1;
     let EPOLL_CTL_ADD: i32 = 1;
     let tag: u64 = 0xDEADBEEF12345678;
-    check(tcprouter_sys::tr_epoll_ctl(ep, EPOLL_CTL_ADD, p[0], EPOLLIN, tag) == 0, "epoll_ctl add");
+    check(tcprouter_sys::c_epoll_ctl(ep, EPOLL_CTL_ADD, p[0], EPOLLIN, tag) == 0, "epoll_ctl add");
     let msg = "x";
     write(p[1], msg[0], 1);
     var evs: tcprouter_sys::EpollEvent[4] = [tcprouter_sys::EpollEvent { 0, 0 }; 4];
-    let n = tcprouter_sys::tr_epoll_wait(ep, evs[0], 4, 1000);
+    let n = tcprouter_sys::c_epoll_wait(ep, evs[0], 4, 1000);
     check(n == 1, "epoll_wait reports one event");
     check(evs[0].events == EPOLLIN && evs[0].data == tag, "event data survives the C copy");
 
