@@ -14,7 +14,7 @@ function pointers; liburing behind a thin C surface (`c_proxy/AGENTS.md`).
 | Copy forwarding, partial writes, half-close, EOF | tcprouter | v1 | |
 | Backpressure (`spill`/`pump`), per-wakeup budget | tcprouter | v1 | Copy first |
 | Pipe pool, splice, hybrid copy/splice switch | tcprouter | v2 | Splice later; leave the switch heuristics out |
-| io_uring engine (COPY/SPLICE), provided buffers, ring-socket | tcprouter | later | epoll first |
+| io_uring engine (COPY/SPLICE), provided buffers, ring-socket | — | no | epoll only (user): little gain measured |
 | Smart ACKs, EOF probes, TFO (`-F`), bulk tuning | — | later | Measured optimisations, not correctness |
 | Coarse timeout sweep | tcprouter | v1 | |
 | Drain with deadline | tcprouter | v1 | |

@@ -44,7 +44,7 @@ struct tr_Slot {                                       // one per connection, in
     tag: u16,                  // handler tag or forward tag (for close-tagged)
     retry: Retry,              // which target addresses were tried
     last_active_ms: i64,
-    inflight: u8,              // kernel ops that still refer to this slot (io_uring later; 0 with epoll)
+    inflight: u8,              // kernel ops that still refer to this slot (0 with epoll; kept for safety)
 }
 
 struct Side { fd: i32, buf: i32 = -1, len: u32, pos: u32, eof: bool, shut_wr: bool, paused: bool }
@@ -55,7 +55,7 @@ struct Side { fd: i32, buf: i32 = -1, len: u32, pos: u32, eof: bool, shut_wr: bo
   is stale and dropped (RT-2b). **Validate the slot index before use** (goose-kb rule MUST-4):
   an out-of-range index from the kernel must not abort the worker.
 - **A slot is freed only when its fds are closed and `inflight == 0`.** With epoll that is
-  immediate; the field exists so io_uring can be added without changing the model.
+  immediate.
 - **Hot and cold fields:** start with one struct. Split into parallel arrays only if `bench/`
   shows it matters (doc README ground rule 2).
 
@@ -122,9 +122,7 @@ A program restart = new process binds (`SO_REUSEPORT`), old process drains.
 Per-worker counters (accepted, closed by reason, bytes each way, connect failures, retries,
 buffer waits, sessions per tag) kept in plain fields, sent on request (§7). Never shared memory.
 
-## 10. io_uring later
+## 10. No io_uring
 
-The model above is engine-neutral: slots with generations, explicit `inflight`, stable buffers,
-tag dispatch. The io_uring engine replaces §2's `epoll_wait` and §4's read/write calls behind the
-same functions, through a thin C sidecar for liburing (the C proxy's pattern). It must pass the
-same tests (doc 06).
+epoll only (user, 2026-11-04): the C proxy's io_uring engines gave little over epoll in Steve's
+benchmarks, so tcprouter does not carry a second engine.
