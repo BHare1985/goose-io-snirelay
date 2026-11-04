@@ -196,6 +196,7 @@ def rt4b_both_close_and_reset():
         c.sendall(b"y" * 100_000)
         c.close()
         t.check(server.wait_stat("open", lambda v: v == 0, timeout=3) == 0, "RT-4b both sides close at once: no connection stays open")
+        backend.wait_results(1, timeout=3)           # that connection's handler must finish before the next scenario
 
         # The client resets (RST) in the middle of a transfer: the backend side is torn down within 1 s.
         state["mode"] = "client_rst"
