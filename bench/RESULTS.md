@@ -96,3 +96,19 @@ The +1.7 MB is not the Goose runtime and not the data stacks: a growable field r
 Config passed as `const Config&` to `spawn`, `start` and `_probe_listeners` (was by value): idle RSS 4,328 -> 3,936 kB (C: 2,620). Micro-benchmarks of the same shape (256 x 800-byte routes, 205 kB): constructing a `Config` costs about 600 kB resident wherever it happens (a literal is built and copied twice), a copy by assignment or into a thread costs about 210 kB, a by-reference argument costs nothing. The process still constructs two (main's, and `Worker.cfg`'s default) and copies two (`w.cfg = cfg`, the thread's argument): about 1.7 MB. Getting to C's number needs a smaller `Route` (Match name 253 B inline + Target of 8 x 64 B addresses inline), not fewer copies.
 
 Route shrink (approved API change): `Addr.text` 64 -> 48 bytes; targets moved out of the routes into `Config.targets: Target[..64]`, `Action.Forward { to: u16 }` holds an index (`add_target(cfg, t)` returns it; check() reports an index not in the table). `Config` went from about 205 kB to about 95 kB. Idle RSS: 3,936 -> 3,024 kB (anonymous 984 kB; C: 2,620 / 480). The target was <= 2,880 kB (10% over C): NOT met, 144 kB over. Building `Worker.cfg` without a default (to skip the second construction) compiles but changes nothing measurable, so it is not done. What is left is the two constructions and two copies of a 95 kB Config (about 600 kB), plus a Goose process base of about 100 kB anonymous.
+
+## Performance pass 2: edge-triggered forwarding (third results set: bench/results/20261104-230817, full run, 3 rounds, same method)
+
+Forwarded sockets are registered once with `EPOLLIN|EPOLLOUT|EPOLLRDHUP|EPOLLET`; events set readiness flags in the slot, a per-connection pump moves bytes until `recv`/`send` says EAGAIN or a short read drained the socket, and connections that stop on the 64 KB budget go on a ready list (the loop then polls with timeout 0). No `epoll_ctl` after registration. Listeners, inspecting connections and handler connections stay level-triggered. A client that hangs up while the backend connect is in progress is only noted (flags); at most one backend connect is wasted.
+
+| row | goose | epoll_copy | ratio | pass 1 | before |
+|---|---|---|---|---|---|
+| 11 B keep-alive | 51,141 | 51,153 | 100.0% | 97.1% | 99% |
+| 11 B new connection per request | 9,470 | 10,418 | 90.9% | 83.6% | 81% |
+| 16 KiB | 42,729 | 42,627 | 100.2% | 99.3% | 63.5% |
+| 64 KiB | 16,579 | 16,220 | 102.2% | 101.9% | 63-69% |
+| 1 MiB | 1,418 | 1,371 | 103.4% | 94.6% | 63-69% |
+| web mix | 30,687 | 30,931 | 99.2% | 98.4% | 81% |
+
+Syscalls per request (bench/syscalls.py): 16 KiB 4.2 (C 4.2); 1 MiB 83.7 (C 69.8); new connection 16.4 (C 15.4: epoll_ctl 2.0 vs 2.0, one more recv: our read that sees the second EOF). Correctness: bench verify passes for all configs. Tests: all 21 files green, backpressure/forward/chaos/memory/sni_forward 8 runs each clean.
+Still not parity: new connection per request (90.9%, one extra recv per connection).
