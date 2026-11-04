@@ -13,3 +13,6 @@ tests/unit/*
 !tests/unit/*.*
 __pycache__/
 *.pyc
+bench/forward_server
+bench/backend
+bench/proxybench-*/
