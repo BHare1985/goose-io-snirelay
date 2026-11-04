@@ -146,6 +146,20 @@ fn test_suffix() {
     check(which(cfg, 1, found("A.EXAMPLE.COM")) == 0, "RT-3b suffix matching ignores case");
 }
 
+// Charlie's addition after approval (B1): users type "*.example.com"; the helper stores the bare form.
+fn test_suffix_helper() {
+    var cfg = tcprouter::Config { .. };
+    listener(cfg, 1, tcprouter::Inspect.Sni);
+    cfg.routes.push(tcprouter::sni_suffix_route(1, "*.example.com", tcprouter::Action.Close));   // 0
+    cfg.routes.push(tcprouter::sni_suffix_route(1, "other.org", tcprouter::Action.Close));       // 1: bare form also fine
+    check(which(cfg, 1, found("a.example.com")) == 0, "B1 '*.example.com' matches a name below it");
+    check(which(cfg, 1, found("example.com")) == -1, "B1 '*.example.com' does not match the apex");
+    check(which(cfg, 1, found("x.other.org")) == 1, "B1 the bare form 'other.org' works the same");
+    var stored = false;
+    match cfg.routes[0].on { SniSuffix s => { stored = s.name == "example.com"; }, _ => {} }
+    check(stored, "B1 the stored form has no star");
+}
+
 fn test_exact_beats_suffix() {
     var cfg = tcprouter::Config { .. };
     listener(cfg, 1, tcprouter::Inspect.Sni);
@@ -224,6 +238,7 @@ fn main() {
     test_no_inspect();
     test_exact();
     test_suffix();
+    test_suffix_helper();
     test_exact_beats_suffix();
     test_no_sni();
     test_unroutable();

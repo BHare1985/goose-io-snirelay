@@ -88,3 +88,18 @@ fn sni_route(listener: u16, name: const u8[:], action: Action) -> Route {
 fn any_route(listener: u16, action: Action) -> Route {
     return Route { listener: listener, on: Match.Any, action: action };
 }
+
+// A SniSuffix route. Users type "*.example.com" (as on a wildcard certificate), the stored form is the
+// bare "example.com": it matches names below it ("a.example.com"), never "example.com" itself.
+fn sni_suffix_route(listener: u16, name: const u8[:], action: Action) -> Route {
+    var bare = name;
+    if bare.len >= 2 && bare[0] == '*' && bare[1] == '.' { bare = bare[2..]; }
+    var n = Match.SniSuffix { name: [] };
+    if bare.len > n.name.cap {
+        n.too_long = true;
+        n.name.append(bare[..n.name.cap]);
+    } else {
+        n.name.append(bare);
+    }
+    return Route { listener: listener, on: n, action: action };
+}
