@@ -12,6 +12,7 @@ import fcntl, hashlib, os, random, resource, selectors, signal, socket, struct, 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SERVER = os.environ.get("FORWARD_SERVER", os.path.join(HERE, "forward_server"))
+HANDLER_SERVER = os.environ.get("HANDLER_SERVER", os.path.join(HERE, "handler_server"))
 
 # --------------------------------------------------------------------------------------------- reporting
 
@@ -173,9 +174,11 @@ class ServerDied(Exception):
 class Server:
     """Runs forward_server and follows its stdout/stderr."""
     def __init__(self, listens, targets, workers=1, buffers=None, buffer_size=None, stat_ms=1000, nofile=None, routes=(),
-                 extra=()):
+                 extra=(), exe=None, handles=()):
         self.workers = workers
-        self.args = [SERVER]
+        self.exe = exe or SERVER
+        self.args = [self.exe]
+        for h in handles: self.args += ["--handle", h]
         for l in listens: self.args += ["--listen", l]
         for t in targets: self.args += ["--to", t]
         for listen, tos in routes: self.args += ["--route", f"{listen}={','.join(tos)}"]
@@ -189,11 +192,12 @@ class Server:
         self.stat_lines = 0
         self.max_buffers_in_use = 0
         self.stderr = []
+        self.lines = []                 # every other stdout line (handler_server's "E …" event log)
         self._lock = threading.Lock()
 
     def start(self):
-        if not os.path.exists(SERVER):
-            raise ServerDied(f"{SERVER} is not built")
+        if not os.path.exists(self.exe):
+            raise ServerDied(f"{self.exe} is not built")
         def limits():
             # The server gets exactly this soft limit: lower than the driver's too (raise_nofile only raises).
             if self.nofile:
@@ -211,6 +215,8 @@ class Server:
             with self._lock:
                 if parts[:1] == ["READY"]:
                     self.ready.add(int(parts[1]))
+                elif parts[:1] != ["STAT"]:
+                    self.lines.append(line.rstrip("\n"))
                 elif parts[:1] == ["STAT"]:
                     d = {"worker": int(parts[1])}
                     for kv in parts[2:]:

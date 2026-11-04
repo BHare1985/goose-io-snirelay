@@ -8,6 +8,7 @@
 import tcprouter from "..";
 import slot_pool;
 import std;
+import os;
 
 struct Session { inbox: u8[..2048], live: bool }
 
@@ -59,9 +60,13 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
     };
 }
 
+// `http_hello` listens on 0.0.0.0:8080; `http_hello 9000` on port 9000.
 fn main() {
+    var address: u8[>..] = [];
+    address.append("0.0.0.0:");
+    if arg_count() > 1 { arg(1, address); } else { address.append("8080"); }
     var cfg = tcprouter::Config { .. };
-    cfg.listeners.push(tcprouter::Listener { id: 1, addr: tcprouter::addr("0.0.0.0:8080") });
+    cfg.listeners.push(tcprouter::Listener { id: 1, addr: tcprouter::addr(address) });
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Handle { tag: 1 }));
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { print(problems); exit(2); }
