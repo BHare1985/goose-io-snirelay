@@ -1,6 +1,6 @@
 // The engine's public face: workers, events, and the calls a handler block may make
-// (design/02-api.md sections 3 to 6). STUBS: every function has its final signature and no
-// behaviour yet; the tests that prove each row make them real.
+// (design/02-api.md sections 3 to 6). Forwarding is real as of M2; handler mode, timeouts, drain,
+// tags and messages are still stubs and are marked STUB.
 namespace tcprouter;
 
 import .config;
@@ -30,64 +30,6 @@ enum Event {
     Tick { now_ms: i64 },
 }
 
-// --- the worker ---------------------------------------------------------------------------------
-
-// One event loop and everything it owns. A root struct: create it where it lives, then start it.
-//     var w = tcprouter::Worker { .. };
-//     if !tcprouter::start(w, cfg, index) { print(w.error); return; }
-root struct Worker {
-    error: u8[..200] = [],             // why start() returned false
-    index: i64 = 0,
-    tr_slots: tr_Slot[>..] = [],
-    tr_free: u32[>..<] = [],
-}
-
-struct tr_Slot { gen: u32, live: bool }
-
-// Binds this worker's listeners (SO_REUSEPORT) and prepares its tables. Returns false and fills
-// w.error (naming the address and errno) instead of aborting when it cannot, e.g. the port is
-// taken (RT-1d). Never calls abort or exit (RT-1e).
-fn start(w: Worker&, cfg: Config, index: i64) -> bool {
-    return true;
-}
-
-// Runs the loop until the worker has drained or been stopped, calling your block once per event,
-// on this worker's thread, one at a time. The block gets the worker so it can call send, close...
-// Forward-only configs pass an empty block.
-fn serve<F>(w: Worker&) {
-    let e: Event = Event.Tick { now_ms: 0 };    // STUB: one event, so the block is type-checked
-    F(w, e);
-}
-
-// As serve, with a policy deciding where forwarded connections go (tcpproxy, design/07).
-fn serve<P, F>(w: Worker&, p: P&) {
-    let e: Event = Event.Tick { now_ms: 0 };
-    F(w, e);
-}
-
-// --- calls a handler block may make (on the worker it was called on) -----------------------------
-
-// Queues bytes to the peer. False if the connection is gone or its output queue is full; in the
-// second case wait for Writable. Never blocks, never grows memory past the per-connection cap (RT-5e).
-fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool { return false; }
-
-// Closes after the queued bytes are sent.
-fn close(w: Worker&, c: Conn) {}
-
-// Closes now with an RST. (Named `reset`, not `abort`, which would hide Goose's builtin here.)
-fn reset(w: Worker&, c: Conn) {}
-
-// Your own id for this connection, returned in every later event. tcprouter stores only the u32.
-fn set_user(w: Worker&, c: Conn, user: u32) {}
-fn user(w: Worker&, c: Conn) -> u32 { return 0; }
-
-// Stops or resumes reading from the peer: your own backpressure.
-fn pause_reading(w: Worker&, c: Conn, paused: bool) {}
-
-// Hands the connection to the engine's forwarding. Only before any byte was consumed; returns
-// false (and does nothing) afterwards (RT-4e).
-fn forward(w: Worker&, c: Conn, to: Target) -> bool { return false; }
-
 // --- stats ---------------------------------------------------------------------------------------
 
 // A snapshot of one worker's counters (design/03-engine.md section 9). Flat. Read it on the worker's
@@ -104,19 +46,130 @@ struct Stats {
     buffers_total: i64,       // buffers in this worker's pool
     buffers_in_use: i64,      // buffers borrowed right now
     buffer_waits: i64,        // times a read had to wait for a free buffer
+    stale_events: i64,        // events for a connection that was already closed and its slot reused (RT-2b)
+    bad_events: i64,          // events whose slot index was out of range (RT-2c)
 }
 
+// A snapshot of this worker's counters. Call it on the worker's thread, e.g. from a Tick.
 fn stats(w: Worker&) -> Stats {
-    return Stats { 0, 0, [0; 10], 0, 0, 0, 0, 0, 0, 0 };        // STUB
+    return w.tr_st;
 }
+
+// --- the worker ---------------------------------------------------------------------------------
+
+// One event loop and everything it owns. A root struct: create it where it lives, then start it.
+//     var w = tcprouter::Worker { .. };
+//     if !tcprouter::start(w, cfg, index) { print(w.error); return; }
+// Fields starting with `tr_` are internal (README: naming rule).
+root struct Worker {
+    error: u8[..200] = [],             // why start() returned false
+    index: i64 = 0,
+    cfg: Config = Config { .. },       // this worker's copy of the config
+    tr_epfd: i32 = -1,
+    tr_listen_fds: i32[16] = [-1; 16], // one per cfg.listeners entry
+    tr_rr: i64 = 0,                    // rotates the first target of the built-in policy
+    tr_st: Stats = Stats { .. },
+    tr_slots: tr_Slot[>..] = [],       // one per connection, reused through tr_free_slots
+    tr_free_slots: u32[>..<] = [],
+    tr_pool: u8[>..] = [],             // buffers_per_worker buffers of buffer_size bytes, grown lazily
+    tr_free_bufs: i32[>..<] = [],
+    tr_waiters: u64[>..] = [],         // reads waiting for a buffer, oldest first from tr_waiters_head
+    tr_waiters_head: i64 = 0,
+}
+
+// Binds this worker's listeners (SO_REUSEPORT) and prepares its tables. Returns false and fills
+// w.error (naming the address and errno) instead of aborting when it cannot, e.g. the port is
+// taken (RT-1d). Never calls abort or exit (RT-1e).
+fn start(w: Worker&, cfg: Config, index: i64) -> bool {
+    w.cfg = cfg;
+    w.index = index;
+    if tr_spawn_error.len > 0 {                          // spawn() found a listener it cannot bind
+        w.error.append(tr_spawn_error);
+        return false;
+    }
+    w.tr_epfd = tcprouter_sys::tr_epoll_create();
+    if w.tr_epfd < 0 { return tr_fail(w, "epoll_create", "", -w.tr_epfd); }
+    for li in cfg.listeners.len {
+        var p = tr_Parsed { false, [0; 16], 0 };
+        let text = cfg.listeners[li].addr.text;
+        if !tr_parse_addr(text, p) { return tr_fail(w, "bad listener address", text, 22); }
+        let fd = tcprouter_sys::tr_listen(p.v6, p.ip, p.port, true, 1024);
+        if fd < 0 { return tr_fail(w, "cannot listen on", text, -fd); }
+        w.tr_listen_fds[li] = fd;
+        let rc = tcprouter_sys::tr_epoll_ctl(w.tr_epfd, tcprouter_sys::EPOLL_CTL_ADD, fd, tcprouter_sys::EPOLLIN,
+                                             tr_pack(TR_KIND_LISTENER, li, 0));
+        if rc < 0 { return tr_fail(w, "epoll_ctl", text, -rc); }
+    }
+    return true;
+}
+
+// Runs the loop until the worker has drained or been stopped (M4), calling your block once per
+// Tick, and for handler connections once per event, on this worker's thread, one at a time. The block
+// gets the worker so it can call send, close... Forward-only configs pass an empty block. (A `return`
+// in the block leaves the function that contains it: call a named function from the block.)
+fn serve<F>(w: Worker&) {
+    var events: tcprouter_sys::EpollEvent[256] = [tcprouter_sys::EpollEvent { 0, 0 }; 256];
+    var last_tick: i64 = 0;
+    loop {
+        let n = tcprouter_sys::tr_epoll_wait(w.tr_epfd, events[0], 256, 100);
+        if n < 0 {
+            tr_pause_ms(1);                     // an unexpected epoll error: do not spin
+        } else {
+            for k in n { tr_dispatch(w, events[k].data, events[k].events); }
+        }
+        let now = tcprouter_sys::tr_boottime_ms();
+        if now - last_tick >= 100 {
+            last_tick = now;
+            let tick: Event = Event.Tick { now_ms: now };
+            F(w, tick);
+        }
+    }
+}
+
+// As serve, with a policy deciding where forwarded connections go (tcpproxy, design/07).
+fn serve<P, F>(w: Worker&, p: P&) {
+    let e: Event = Event.Tick { now_ms: 0 };    // STUB until M3
+    F(w, e);
+}
+
+// --- calls a handler block may make (on the worker it was called on) -----------------------------
+
+// Queues bytes to the peer. False if the connection is gone or its output queue is full; in the
+// second case wait for Writable. Never blocks, never grows memory past the per-connection cap (RT-5e).
+fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool { return false; }    // STUB
+
+// Closes after the queued bytes are sent.
+fn close(w: Worker&, c: Conn) {}                                                // STUB
+
+// Closes now with an RST. (Named `reset`, not `abort`, which would hide Goose's builtin here.)
+fn reset(w: Worker&, c: Conn) {}                                                // STUB
+
+// Your own id for this connection, returned in every later event. tcprouter stores only the u32.
+fn set_user(w: Worker&, c: Conn, user: u32) {}                                  // STUB
+fn user(w: Worker&, c: Conn) -> u32 { return 0; }                               // STUB
+
+// Stops or resumes reading from the peer: your own backpressure.
+fn pause_reading(w: Worker&, c: Conn, paused: bool) {}                          // STUB
+
+// Hands the connection to the engine's forwarding. Only before any byte was consumed; returns
+// false (and does nothing) afterwards (RT-4e).
+fn forward(w: Worker&, c: Conn, to: Target) -> bool { return false; }           // STUB
 
 // --- running workers and talking to them --------------------------------------------------------
 
-// Starts `n` workers, each running `worker(cfg, index)`. It first creates one message pipe per
-// worker; each worker's start() finds its own end in a global copied to it at spawn.
+var tr_signal_fd: i32 = -1;
+var tr_spawn_error: u8[..200] = [];
+
+// Starts `n` workers, each running `worker(cfg, index)`. `worker` is a thread_fn with the signature
+// (cfg: Config, index: i64), passed last:
 //     tcprouter::spawn(cfg, 4, worker);
-// `worker` is a thread_fn with the signature (cfg: Config, index: i64). Returns the thread ids.
+// Before it starts anything it blocks SIGTERM and SIGINT (so every worker inherits that and only
+// wait_for_signal_then_drain sees them) and checks that every listener address can be bound by a
+// plain socket, so a port held by another process is an error and not a silently shared port (RT-1d).
+// (Message pipes per worker join here in M4.) Returns the thread ids.
 fn spawn<W>(cfg: Config, n: i64) -> i64[>..] {
+    tr_signal_fd = tcprouter_sys::tr_signals_open();
+    tr_probe_listeners(cfg);
     var ids: i64[>..] = [];
     for i in n { ids.push(thread_spawn(W, cfg, i)); }
     return ids;
@@ -132,8 +185,11 @@ enum Message {
 }
 
 // Sends a message to every worker; each receives it once (RT-10a).
-fn post(m: Message) {}
+fn post(m: Message) {}                                                          // STUB
 
 // Blocks the calling thread until SIGTERM or SIGINT, then drains every worker with a deadline
-// (RT-8c). Call it from main, after spawn.
-fn wait_for_signal_then_drain(deadline_ms: i64) {}
+// (RT-8c). The drain itself arrives in M4: for now it returns, which ends the process. Call it from
+// main, after spawn.
+fn wait_for_signal_then_drain(deadline_ms: i64) {
+    if tr_signal_fd >= 0 { tcprouter_sys::tr_signal_wait(tr_signal_fd); }
+}
