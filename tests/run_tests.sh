@@ -43,6 +43,8 @@ net_drivers=(tests/net/*_test.py)
 if [ -e "${net_drivers[0]}" ]; then
     if "$GOOSE" build --debug -o "$work/forward_server" tests/net/harness/forward_server.goose >"$work/forward_server.build.log" 2>&1; then
         export FORWARD_SERVER="$work/forward_server"
+        # test-only fast echo backend (C, independent of tcprouter): generation_test needs 100,000 accepts/s
+        ${CC:-cc} -O1 -o "$work/echo_server" tests/net/harness/echo_server.c && export ECHO_SERVER="$work/echo_server"
         for drv in "${net_drivers[@]}"; do
             name="$(basename "$drv" .py)"
             case "$drv" in *"$filter"*) ;; *) continue ;; esac

@@ -11,8 +11,5 @@ goose-kb/GOOSE_TEST_PROGRAMS/pkg_c_sources/cpkg/tests/t
 # built test binaries
 tests/unit/*
 !tests/unit/*.*
-tests/net/*
-!tests/net/*.*
-!tests/net/
 __pycache__/
 *.pyc

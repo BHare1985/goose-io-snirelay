@@ -87,7 +87,10 @@ def rt5d():
     # not fail. At 2 s the stalled backend reads everything: every buffer comes back, and all 120 transfers must
     # finish byte-exact. The worker must not abort at any point.
     a_port, b_port, pa, pb = free_port(), free_port(), free_port(), free_port()
-    hold = HoldBackend(a_port, backlog=1024)
+    # A small receive buffer on the stalled backend (set on the listener, inherited by every accepted socket) so the
+    # kernel buffers between it and the proxy cannot swallow 4 MB per connection: without it, how much the kernel
+    # absorbs depends on memory pressure and autotuning, and the pool may never run dry.
+    hold = HoldBackend(a_port, backlog=1024, rcvbuf=32768)
     echo = EchoBackend(b_port, backlog=1024)
     server = Server([], [], workers=1, buffers=4, stat_ms=100,
                     routes=[(f"127.0.0.1:{pa}", [f"127.0.0.1:{a_port}"]), (f"127.0.0.1:{pb}", [f"127.0.0.1:{b_port}"])])
