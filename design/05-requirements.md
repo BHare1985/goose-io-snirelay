@@ -55,8 +55,8 @@ Columns: id · behaviour · priority · test · status.
 |---|---|---|---|---|
 | RT-5a | An idle forwarded connection holds no pool buffer | v1 | `memory_test` | green |
 | RT-5b | Memory per idle connection ≤ 512 bytes of worker memory beyond kernel socket buffers (RSS growth over 10,000 idle) | v1 | `memory_test` | green |
-| RT-5c | A destination that stops reading stops the engine reading from the source; RSS grows ≤ 64 MB while 1 GB is offered (measured growth printed each run) | v1 | `backpressure_test` | green |
-| RT-5d | With the pool exhausted, the worker keeps serving other connections as buffers return; no abort, waits counted | v1 | `backpressure_test` | green |
+| RT-5c | A destination that stops reading stops the engine reading from the source; RSS grows ≤ 64 MB while 1 GB is offered (measured growth printed each run) | v1 | `backpressure_test` | done |
+| RT-5d | With the pool exhausted, the worker keeps serving other connections as buffers return; no abort, waits counted | v1 | `backpressure_test` | done |
 | RT-5e | Handler `send` returns false at the per-connection cap and `Writable` follows once drained; memory stays bounded | v1 | `handler_test` | green |
 | RT-5f | One busy connection can't starve others: with one 1 GB stream and 100 small request/reply clients, small p99 < 10 ms | v1 | `fairness_test` | design |
 | RT-5g | No allocation on the established forwarding path (Goose `--stats` or data-stack high-water flat across 10 GB forwarded) | v1 | `memory_test` | design |
@@ -65,11 +65,11 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-6a | Past a tag's deadline, **zero** bytes are forwarded to or from that tag's servers, also after the process was frozen (SIGSTOP) across the deadline and resumed | v1 | `deadline_test` (frozen case) | design |
-| RT-6b | `CloseTagged(tag, gen)` closes every matching connection within one loop pass, before handling further events | v1 | `deadline_test` | design |
-| RT-6c | Deadlines are on `CLOCK_BOOTTIME` | v1 | `deadline_test` (unit, clock source) | design |
-| RT-6d | Deadlines are absolute and the latest wins: a later `until_ms` renews, an earlier or equal one is ignored, so a delayed old message or a duplicate can neither shorten nor stretch a deadline. Revoking is `CloseTagged` or a fence, never a smaller deadline | v1 | `deadline_test` | design |
-| RT-6e | A tag can start fenced (no deadline yet = no connections) | v1 | `deadline_test` | design |
+| RT-6a | Past a tag's deadline, **zero** bytes are forwarded to or from that tag's servers, also after the process was frozen (SIGSTOP) across the deadline and resumed | v1 | `deadline_test` (frozen case) | red (awaiting approval) |
+| RT-6b | `CloseTagged(tag, gen)` closes every matching connection within one loop pass, before handling further events | v1 | `deadline_test` | red (awaiting approval) |
+| RT-6c | Deadlines are on `CLOCK_BOOTTIME` | v1 | `deadline_test` (unit, clock source) | green |
+| RT-6d | Deadlines are absolute and the latest wins: a later `until_ms` renews, an earlier or equal one is ignored, so a delayed old message or a duplicate can neither shorten nor stretch a deadline. Revoking is `CloseTagged` or a fence, never a smaller deadline | v1 | `deadline_test` | red (awaiting approval) |
+| RT-6e | A tag can start fenced (no deadline yet = no connections) | v1 | `deadline_test` | red (awaiting approval) |
 
 ## RT-7 Timeouts
 
@@ -84,9 +84,9 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-8a | `Drain`: listeners close at once; a new process on the same port gets all new connections | v1 | `drain_test` | red (awaiting approval) |
-| RT-8b | `Drain` returns when the last connection closes, or closes the rest at the deadline | v1 | `drain_test` | red (awaiting approval) |
-| RT-8c | SIGTERM and SIGINT start a drain (via `wait_for_signal_then_drain`) | v1 | `drain_test` | red (awaiting approval) |
+| RT-8a | `Drain`: listeners close at once; a new process on the same port gets all new connections | v1 | `drain_test` | green |
+| RT-8b | `Drain` returns when the last connection closes, or closes the rest at the deadline | v1 | `drain_test` | green |
+| RT-8c | SIGTERM and SIGINT start a drain (via `wait_for_signal_then_drain`) | v1 | `drain_test` | green |
 
 ## RT-9 Handler mode
 
@@ -101,8 +101,8 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-10a | `post(m)` reaches every worker once | v1 | `message_test` | design |
-| RT-10b | Stats: accepted, closed by reason, bytes each way, connect failures, retries, buffer waits, sessions per tag; summed across workers they match the test's own counts exactly | v1 | `message_test` | design |
+| RT-10a | `post(m)` reaches every worker once | v1 | `message_test` | red (awaiting approval) |
+| RT-10b | Stats: accepted, closed by reason, bytes each way, connect failures, retries, buffer waits, sessions per tag; summed across workers they match the test's own counts exactly | v1 | `message_test` | red (awaiting approval) |
 
 ## Documentation and polish (v1)
 

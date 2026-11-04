@@ -60,9 +60,15 @@ class Test:
 
 _lock_file = None
 
+def boottime_ms():
+    """CLOCK_BOOTTIME in milliseconds: the clock tcprouter's deadlines use."""
+    return int(time.clock_gettime(time.CLOCK_BOOTTIME) * 1000)
+
 def host_lock():
     """One network test at a time on this host (they use fixed port ranges and measure memory)."""
     global _lock_file
+    if os.environ.get("TCPROUTER_NO_LOCK"):        # a load generator for a flake hunt, run on purpose beside another test
+        return
     _lock_file = open("/tmp/tcprouter-net-tests.lock", "w")
     fcntl.flock(_lock_file, fcntl.LOCK_EX)
 
@@ -244,6 +250,26 @@ class Server:
         except subprocess.TimeoutExpired:
             return time.time() - t0, None
         return time.time() - t0, self.proc.returncode
+
+    def totals(self, timeout=5):
+        """Asks the control thread for gather_stats and returns the TOTAL line as a dict (closed as a list, tags as {tag: open})."""
+        with self._lock:
+            seen = sum(1 for l in self.lines if l.startswith("TOTAL "))
+        self.command("stats")
+        end = time.time() + timeout
+        while time.time() < end:
+            with self._lock:
+                lines = [l for l in self.lines if l.startswith("TOTAL ")]
+            if len(lines) > seen:
+                d = {}
+                for kv in lines[-1].split()[1:]:
+                    k, v = kv.split("=")
+                    if k == "closed": d[k] = [int(x) for x in v.split(",")]
+                    elif k == "tags": d[k] = {int(a.split(":")[0]): int(a.split(":")[1]) for a in v.split(";") if a and a.split(":")[1] != "0"}
+                    else: d[k] = int(v)
+                return d
+            time.sleep(0.02)
+        raise TimeoutError("no TOTAL line: gather_stats did not return")
 
     def alive(self):
         return self.proc.poll() is None

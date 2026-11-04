@@ -6,9 +6,11 @@
 //                    [--route LISTEN=TARGET[,TARGET…] …]
 //                    [--workers 1] [--buffers 4096] [--buffer-size 16384] [--stat-ms 1000]
 //                    [--inspect-listen ADDR] [--sni NAME=T[,T]] [--sni-suffix NAME=T[,T]] [--sni-none T[,T]] [--sni-any T[,T]]
+//                    [--tagged-route LISTEN=T[,T]@TAG:GEN] [--fenced TAG]
 //                    [--control] [--drain-ms N]
 //                    [--connect-timeout-ms N] [--inspect-timeout-ms N] [--idle-timeout-ms N] [--half-close-timeout-ms N]
-// --control: read commands from stdin on a control thread (`drain MS`), and exit when the workers have drained; without it the
+// --tagged-route: like --route, with the targets labelled TAG and GEN (deadlines, close-by-tag). --fenced: that tag starts fenced.
+// --control: read commands from stdin on a control thread (`drain MS`, `deadline TAG BOOTTIME_MS`, `close-tagged TAG GEN`, `stats`), and exit when the workers have drained; without it the
 // program waits for SIGTERM/SIGINT, drains with --drain-ms (default 5000) and exits.
 // --inspect-listen: one listener with `inspect: Sni`; the --sni* flags add its routes, in the order given:
 //   --sni exact name, --sni-suffix names below a domain, --sni-none no name / not TLS, --sni-any everything else.
@@ -30,6 +32,8 @@ root struct Options {
     listens: u8[][>..] = [],
     targets: u8[][>..] = [],
     routes: u8[][>..] = [],
+    tagged_routes: u8[][>..] = [],
+    fenced: u8[][>..] = [],
     inspect_listen: u8[][>..] = [],
     sni_specs: u8[][>..] = [],          // "sni:NAME=T,T", "suffix:NAME=T", "none:T", "any:T", in flag order
     connect_timeout_ms: i64 = 0,
@@ -46,6 +50,7 @@ root struct Options {
 
 // How often a worker prints STAT. A global set in main before the workers start: workers get a copy.
 var STAT_MS: i64 = 1000;
+var WORKERS: i64 = 1;
 
 fn die(message: const u8[:]) {
     write_stderr(str("forward_server: ", message, "\n"));
@@ -101,21 +106,63 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
     tcprouter::serve(w) { w, ev => on_event(w, ev, index, every_ms, last); };
 }
 
+// One line with the whole program's counters, as gather_stats summed them.
+fn print_totals(s: tcprouter::Stats) {
+    var line: u8[>..] = [];
+    format(line, "TOTAL accepted=", s.accepted, " open=", s.open, " bytes_in=", s.bytes_in, " bytes_out=", s.bytes_out,
+           " connect_failures=", s.connect_failures, " retries=", s.retries, " closed=");
+    for k in 11 { if k > 0 { line.push(','); } format(line, s.closed[k]); }
+    format(line, " tags=");
+    for t in s.tags { format(line, t.tag, ":", t.open, ";"); }
+    print(line);
+}
+
 // --- the control thread ---------------------------------------------------------------------------------------------
 
 // Reads commands from stdin and turns them into messages to the workers: the pattern a real program uses for its control
 // protocol. It runs after spawn(), so it has the message pipes (globals are copied to a thread when it starts).
+// stdin is read with the raw read(2), not os::read_line: a thread blocked in stdio holds stdin's lock, and exit() then waits for it forever.
+extern fn read(fd: i32, buf: u8&, n: u64) -> i64;
+
+fn run_command(line: const u8[:]) {
+    let space = find(line, " ");
+    let verb = if space < 0 { line[..] } else { line[..space] };
+    let rest = if space < 0 { line[line.len..] } else { line[space + 1..] };
+    let parts = words(rest);
+    if verb == "drain" {
+        let ms, ok = parse_int(rest);
+        if ok { tcprouter::post(tcprouter::Message.Drain { deadline_ms: ms }); }
+    } else if verb == "deadline" && parts.len == 2 {
+        let tag, ok1 = parse_int(parts[0]);
+        let until, ok2 = parse_int(parts[1]);
+        if ok1 && ok2 { tcprouter::post(tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
+    } else if verb == "close-tagged" && parts.len == 2 {
+        let tag, ok1 = parse_int(parts[0]);
+        let gen, ok2 = parse_int(parts[1]);
+        if ok1 && ok2 { tcprouter::post(tcprouter::Message.CloseTagged { tag: tag as u16, gen: gen as u32 }); }
+    } else if verb == "stats" {
+        print_totals(tcprouter::gather_stats(WORKERS));
+    }
+}
+
+// Reads commands from stdin and turns them into messages to the workers: the pattern a real program uses for its control
+// protocol. It runs after spawn(), so it has the message pipes (globals are copied to a thread when it starts).
 thread_fn control() {
-    var line: u8[>..] = [];
-    while read_line(line) {
-        let space = find(line, " ");
-        let verb = if space < 0 { line[..] } else { line[..space] };
-        let rest = if space < 0 { line[line.len..] } else { line[space + 1..] };
-        if verb == "drain" {
-            let ms, ok = parse_int(rest);
-            if ok { tcprouter::post(tcprouter::Message.Drain { deadline_ms: ms }); }
+    var pending: u8[>..] = [];
+    var chunk: u8[256] = [0; 256];
+    loop {
+        let n = read(0, chunk[0], 256);
+        if n <= 0 { return; }
+        pending.append(chunk[..n]);
+        loop {
+            let nl = find(pending, "\n");
+            if nl < 0 { break; }
+            run_command(pending[..nl]);
+            // drop the line: shift the rest down
+            let rest = pending.len - nl - 1;
+            for k in rest { pending[k] = pending[nl + 1 + k]; }
+            pending.pop_n(nl + 1);
         }
-        line.clear();
     }
 }
 
@@ -142,6 +189,8 @@ fn parse_options(o: Options&) {
         else if flag == "--drain-ms" { o.drain_ms = number(value, flag); }
         else if flag == "--idle-timeout-ms" { o.idle_timeout_ms = number(value, flag); }
         else if flag == "--half-close-timeout-ms" { o.half_close_timeout_ms = number(value, flag); }
+        else if flag == "--tagged-route" { o.tagged_routes.push(value); }
+        else if flag == "--fenced" { o.fenced.push(value); }
         else if flag == "--workers" { o.workers = number(value, flag); }
         else if flag == "--buffers" { o.buffers = number(value, flag); }
         else if flag == "--buffer-size" { o.buffer_size = number(value, flag); }
@@ -154,7 +203,7 @@ fn parse_options(o: Options&) {
 fn main() {
     var o = Options { .. };
     parse_options(o);
-    if o.routes.len == 0 && o.inspect_listen.len == 0 && (o.listens.len == 0 || o.targets.len == 0) {
+    if o.routes.len == 0 && o.tagged_routes.len == 0 && o.inspect_listen.len == 0 && (o.listens.len == 0 || o.targets.len == 0) {
         die("need --route, --inspect-listen, or --listen and --to");
     }
 
@@ -193,6 +242,26 @@ fn main() {
     if o.inspect_timeout_ms > 0 { cfg.limits.inspect_timeout_ms = o.inspect_timeout_ms; }
     if o.idle_timeout_ms > 0 { cfg.limits.idle_timeout_ms = o.idle_timeout_ms; }
     if o.half_close_timeout_ms > 0 { cfg.limits.half_close_timeout_ms = o.half_close_timeout_ms; }
+    for r in o.tagged_routes {
+        if cfg.listeners.len == cfg.listeners.cap { die("too many listeners (16 at most)"); }
+        let eq = find(r, "=");
+        let at = find(r, "@");
+        if eq < 0 || at < eq { die(str("--tagged-route needs LISTEN=TARGET@TAG:GEN, got '", r, "'")); }
+        let colon = find(r[at + 1..], ":");
+        let tag, ok1 = parse_int(r[at + 1..][..colon]);
+        let gen, ok2 = parse_int(r[at + 1..][colon + 1..]);
+        if colon < 0 || !ok1 || !ok2 { die(str("bad TAG:GEN in '", r, "'")); }
+        cfg.listeners.push(tcprouter::Listener { id: id, addr: tcprouter::addr(r[..eq]) });
+        var t = tcprouter::Target { addrs: [], tag: tag as u16, gen: gen as u32 };
+        each_split(r[eq + 1..at], ',') { t.addrs.push(tcprouter::addr(it)); };
+        cfg.routes.push(tcprouter::any_route(id, tcprouter::Action.Forward { to: t }));
+        id++;
+    }
+    for f in o.fenced {
+        let tag, ok = parse_int(f);
+        if ok { cfg.fenced_tags.push(tag as u16); }
+    }
+
     var have_inspect = false;
     for text in o.inspect_listen {                  // an array of strings can be walked, not indexed
         if !have_inspect {
@@ -224,6 +293,7 @@ fn main() {
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
 
+    WORKERS = o.workers;
     let ids = tcprouter::spawn(cfg, o.workers, worker);
     var failed = 0;
     for i in o.workers { if !qget<Started>().ok { failed++; } }

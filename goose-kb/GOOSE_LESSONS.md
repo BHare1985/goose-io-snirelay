@@ -27,3 +27,7 @@ Still open: lifetime-checker error messages in practice, `thread_spawn_contained
 20. [V] Goose moves daily: at 751794c (7 commits after dcaf1ef) `root struct` still cannot nest another root (e.g. a slot_pool inside a root) nor be returned. Re-test these when updating; `bin/update-goose.sh` fetches and rebuilds (the full rebuild is about 10 minutes, main.cpp dominates).
 21. [V] Library root types (`slot_pool`, `slice_pool`) are implemented in Goose with `root struct`; own tables = own root fields, one data stack each.
 22. [V] A --debug test catches real bugs: my first sni.goose indexed `rest[0]` on an empty slice and aborted with "index 0 out of bounds"; fixed by checking `rest.len >= 1` first.
+23. [V] A thread blocked in `os::read_line` (stdio) holds stdin's lock, and `exit()`/returning from `main` then hangs forever. A
+    control thread must read stdin with a raw `read(0, …)` extern instead (tests/net/harness/forward_server.goose does).
+24. [V] Goose `thread_spawn(W, …)` takes the thread_fn as a trailing function argument of a generic function; globals set in `main`
+    before the spawn (pipe fds, a worker count) are copied into each worker and into a control thread started later.

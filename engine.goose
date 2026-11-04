@@ -36,6 +36,8 @@ enum Event {
 // A snapshot of one worker's counters (design/03-engine.md section 9). Flat. Read it on the worker's
 // own thread, for example from a Tick event; nothing is shared between workers, so there is no lock.
 // (Sessions per tag arrive with tags in M4.)
+struct TagSessions { tag: u16, open: i64 }
+
 struct Stats {
     accepted: i64,            // connections accepted
     open: i64,                // connections open now
@@ -50,6 +52,7 @@ struct Stats {
     stale_events: i64,        // events for a connection that was already closed and its slot reused (RT-2b)
     bad_events: i64,          // events whose slot index or kind was out of range (RT-2c)
     accept_failures: i64,     // accepts that failed for lack of a resource; the listener rests briefly (RT-1e)
+    tags: TagSessions[..16],  // connections open now under each tag (sessions per tag)
 }
 
 // A snapshot of this worker's counters. Call it on the worker's thread, e.g. from a Tick.
@@ -82,6 +85,9 @@ root struct Worker {
     _pending: _PendingEvent[>..] = [],           // handler events queued during a batch, drained by serve (handler.goose)
     _pending_head: i64 = 0,
     _override_targets: Target[>..] = [],         // targets given to forward(); a free entry has no addresses
+    _message_fd: i32 = -1,                       // this worker's end of its message pipe (messages.goose)
+    _draining: bool = false,
+    _drain_deadline_ms: i64 = 0,
     _now_ms: i64 = 0,                            // CLOCK_BOOTTIME at the start of the current pass of the loop
     _listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
 }
@@ -98,6 +104,10 @@ fn start(w: Worker&, cfg: Config, index: i64) -> bool {
     }
     w._epoll_fd = c_epoll_create();
     if w._epoll_fd < 0 { return _fail_start(w, "epoll_create", "", -w._epoll_fd); }
+    if index < _worker_count {                              // spawn() made one pipe per worker
+        w._message_fd = _message_read_fds[index];
+        c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, w._message_fd, c_EPOLLIN, _pack_event_data(_EVENT_KIND_MESSAGE, 0, 0));
+    }
     for li in cfg.listeners.len {
         var p = _ParsedAddress { false, [0; 16], 0 };
         let text = cfg.listeners[li].addr.text;
@@ -126,9 +136,12 @@ fn serve<F>(w: Worker&) {
         if n < 0 {
             _pause_milliseconds(1);                     // an unexpected epoll error: do not spin
         } else {
-            for k in n { _dispatch_event(w, events[k].data, events[k].events); }
+            // Messages first: a drain or a fence must not be outrun by a burst of traffic in the same pass.
+            for k in n { if (events[k].data & 0xff) == _EVENT_KIND_MESSAGE { _read_messages(w); } }
+            for k in n { if (events[k].data & 0xff) != _EVENT_KIND_MESSAGE { _dispatch_event(w, events[k].data, events[k].events); } }
         }
         _deliver_events(w, F);
+        if _drain_finished(w) { _deliver_events(w, F); return; }
         let now = w._now_ms;
         _resume_paused_listeners(w, now);
         if now - last_sweep >= 250 {
@@ -161,12 +174,22 @@ var _spawn_error: u8[..200] = [];
 // Before it starts anything it blocks SIGTERM and SIGINT (so every worker inherits that and only
 // wait_for_signal_then_drain sees them) and checks that every listener address can be bound by a
 // plain socket, so a port held by another process is an error and not a silently shared port (RT-1d).
-// (Message pipes per worker join here in M4.) Returns the thread ids.
+// It also creates one message pipe per worker, before any worker starts (messages.goose). At most 64 workers. Returns the thread ids.
 fn spawn<W>(cfg: Config, n: i64) -> i64[>..] {
     _signal_fd = c_signals_open();
     _probe_listeners(cfg);
+    _worker_count = if n < _MAX_WORKERS { n } else { _MAX_WORKERS };
+    for i in _worker_count {
+        var fds: i32[2] = [-1, -1];
+        c_pipe(fds);
+        _message_read_fds[i] = fds[0];
+        _message_write_fds[i] = fds[1];
+    }
     var ids: i64[>..] = [];
-    for i in n { ids.push(thread_spawn(W, cfg, i)); }
+    for i in _worker_count {
+        _worker_ids[i] = thread_spawn(W, cfg, i);
+        ids.push(_worker_ids[i]);
+    }
     return ids;
 }
 
@@ -175,16 +198,8 @@ fn cpu_count() -> i64 { return hardware_threads(); }
 
 enum Message {
     Drain { deadline_ms: i64 },
-    CloseTagged { tag: u16, gen: u32 },
+    Deadline { tag: u16, until_ms: i64 },     // tag may forward until this CLOCK_BOOTTIME millisecond; the latest deadline wins
+    CloseTagged { tag: u16, gen: u32 },       // close every connection of the tag whose target generation is <= gen
     Stats { reply_to: u16 },
 }
 
-// Sends a message to every worker; each receives it once (RT-10a).
-fn post(m: Message) {}                                                          // STUB
-
-// Blocks the calling thread until SIGTERM or SIGINT, then drains every worker with a deadline
-// (RT-8c). The drain itself arrives in M4: for now it returns, which ends the process. Call it from
-// main, after spawn.
-fn wait_for_signal_then_drain(deadline_ms: i64) {
-    if _signal_fd >= 0 { c_signal_wait(_signal_fd); }
-}

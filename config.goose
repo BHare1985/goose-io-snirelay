@@ -20,8 +20,9 @@ fn addr(text: const u8[:]) -> Addr {
 
 // Where a connection's bytes go when the engine forwards them: tried in order, rotating the
 // first choice from one connection to the next (the built-in policy).
-// `too_many` is set when more than 8 addresses were given; check() reports it.
-struct Target { addrs: Addr[..8], too_many: bool = false }
+// `too_many` is set when more than 8 addresses were given; check() reports it. `tag` and `gen` label the connections forwarded
+// through this target, for deadlines and close-by-tag (messages.goose); tag 0 is untagged and is never fenced.
+struct Target { addrs: Addr[..8], too_many: bool = false, tag: u16 = 0, gen: u32 = 0 }
 
 fn target(names: const u8[:][:]) -> Target {
     var t = Target { addrs: [] };
@@ -71,6 +72,7 @@ struct Config {
     listeners: Listener[..16],
     routes: Route[..256],
     limits: Limits = Limits { .. },
+    fenced_tags: u16[..16],            // tags that start with no deadline, so their connections are closed until one arrives (RT-6e)
 }
 
 // Route constructors, so a config reads like a table.

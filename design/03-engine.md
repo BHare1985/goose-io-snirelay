@@ -213,3 +213,16 @@ benchmarks, so tcprouter does not carry a second engine.
   alive). Handler connections are covered by the idle rule.
 - Measured, limit / closed at: connect 0.5 s / 0.60 s, idle 1.0 s / 1.20 s, half-close 1.0 s / 1.00-1.10 s: every one in limit
   to limit + 250 ms, the sweep period.
+
+## 15. As built: messages and drain (M4 group B)
+
+- **One pipe per worker**, made by `spawn()` before any worker starts (a global set in `main` is copied into each worker at spawn, so
+  `start()` finds its own read end by index, and a control thread started after `spawn` can `post`). A message is one 16-byte flat
+  record (kind, tag, generation, value); a pipe write that small is atomic. The worker registers its read end in epoll as a fourth event
+  kind. At most 64 workers per `spawn`.
+- **Messages are handled before the events of the same pass**: the loop reads the pipe first, then dispatches the rest of the batch, so a
+  drain (and later a fence) cannot be outrun by a burst of traffic.
+- **Drain.** `Message.Drain { deadline_ms }` closes the worker's listeners at once (new connections are then refused by the kernel and a
+  new process can bind the port: RT-8a), lets open connections finish, and records the deadline. Once per loop pass the worker checks:
+  nothing open means `serve` returns; past the deadline the rest are closed as `Drained` (their Closed events are delivered) and `serve`
+  returns. `wait_for_signal_then_drain` reads the signalfd, posts the drain and `thread_wait`s for every worker.

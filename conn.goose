@@ -28,6 +28,7 @@ let _STATE_FORWARDING: u8 = 2;
 let _EVENT_KIND_LISTENER: u64 = 1;
 let _EVENT_KIND_CLIENT: u64 = 2;
 let _EVENT_KIND_SERVER: u64 = 3;
+let _EVENT_KIND_MESSAGE: u64 = 4;
 
 // One direction of a connection.
 struct _Direction {

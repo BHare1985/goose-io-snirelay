@@ -13,6 +13,7 @@
  */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -192,6 +193,24 @@ int32_t c_signal_wait(int32_t fd) {
         if (n == (ssize_t)sizeof si) return (int32_t)si.ssi_signo;
         if (n < 0 && errno != EINTR) return -errno;
     }
+}
+
+/* --- pipes (messages to workers) ---------------------------------------------------------------------- */
+
+/* A pipe, close-on-exec, whose READ end is non-blocking (a worker polls it from epoll); the write end blocks. 0 or -errno. */
+int32_t c_pipe(int32_t *fds) {
+    if (pipe2(fds, O_CLOEXEC) < 0) return -errno;
+    return fcntl(fds[0], F_SETFL, O_NONBLOCK) < 0 ? -errno : 0;
+}
+
+int64_t c_pipe_write(int32_t fd, const uint8_t *buf, int64_t len) {
+    ssize_t n = write(fd, buf, (size_t)len);
+    return n < 0 ? -errno : n;
+}
+
+int64_t c_pipe_read(int32_t fd, uint8_t *buf, int64_t len) {
+    ssize_t n = read(fd, buf, (size_t)len);
+    return n < 0 ? -errno : n;
 }
 
 /* --- clock ------------------------------------------------------------------------------------------- */
