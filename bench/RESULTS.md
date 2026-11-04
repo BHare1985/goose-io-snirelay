@@ -81,3 +81,14 @@ NOT parity on two rows: 1 MiB (94.6%) and new connection per request (83.6%). Ru
 New connection per request: both proxies spend ~4.8 of 5 CPU seconds in the kernel (user 0.15 s vs 0.12 s), so the gap is syscalls: 18.5 vs 15.4 per request.
 Earlier I attributed the difference to half-close semantics. That was wrong: the C proxy passes the same half-close scenarios as RT-4b (client half-close with a 2 MB reply, backend half-close then 2 MB back; both `epoll_copy` and `-v`, checked 2026-11-04 with a standalone script), so half-close is not what costs the syscalls.
 The real difference is the engine design: the C proxy registers each socket once with `EPOLLIN|EPOLLOUT|EPOLLRDHUP|EPOLLET` and tracks readiness in flags, so it makes 2 `epoll_ctl` per connection and none on the data path. Ours is level-triggered and changes interest (4 `epoll_ctl`: ADD, ADD, MOD to start reading the server, MOD to stop at EOF) and does one more `recv` (EOF of the second side). Closing that gap means moving to edge-triggered readiness, a redesign of backpressure (RT-5c/5d), not a tuning change.
+
+## Idle RSS breakdown (measured 2026-11-04, one idle worker, no connections)
+
+| | RSS | anonymous |
+|---|---|---|
+| C epoll_copy | 2,620 kB | 480 kB |
+| forward_server (Goose) | 4,328 kB | 2,292 kB |
+| same, with `Config.routes` capped at 16 instead of 256 (experiment, not committed) | 2,480 kB | 444 kB |
+| empty Goose program / root struct with 1 or 3 growable fields | 2,068 kB / same / same | 104 kB |
+
+The +1.7 MB is not the Goose runtime and not the data stacks: a growable field reserves a 2 MB region of virtual memory that costs no resident memory until used (empty program: 2,068 kB, unchanged by adding fields). It is `Config`: 256 routes of about 800 bytes (the inline SNI match plus a Target of 8 addresses of 64 bytes) is about 200 kB, and a `Config` passed by value is copied and touched in full each time. The process holds about nine copies (main's, `spawn`'s argument, the thread's, `Worker.cfg`, `start`'s argument, ...): nine 2 MB regions with ~200 kB resident each, 1.8 MB together. Shrinking the cap to 16 routes removes all nine and brings idle RSS to 2,480 kB, below the C proxy. Not fixed yet: options are fewer copies (`const Config&`) or a smaller `Route`.
