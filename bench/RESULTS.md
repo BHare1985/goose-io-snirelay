@@ -112,3 +112,7 @@ Forwarded sockets are registered once with `EPOLLIN|EPOLLOUT|EPOLLRDHUP|EPOLLET`
 
 Syscalls per request (bench/syscalls.py): 16 KiB 4.2 (C 4.2); 1 MiB 83.7 (C 69.8); new connection 16.4 (C 15.4: epoll_ctl 2.0 vs 2.0, one more recv: our read that sees the second EOF). Correctness: bench verify passes for all configs. Tests: all 21 files green, backpressure/forward/chaos/memory/sni_forward 8 runs each clean.
 Still not parity: new connection per request (90.9%, one extra recv per connection).
+
+## Idle RSS after the name pool (same sampler)
+
+SNI names moved out of the routes into one pool, `Config.names: u8[..8192]` (a route holds `at`, `len`); `sni_route` and `sni_suffix_route` now take the config (`sni_route(cfg, listener, name, action)`) because they store the name there. `Config` is about 40 kB (was 205 kB). Idle RSS: 3,024 -> 2,588 kB (anonymous 548 kB); C: 2,620 / 480 kB. With a 16 KiB pool it was 2,652 kB; 8 KiB holds 256 names of 32 bytes. All 21 test files green, 3 new unit checks (pool overflow reported, out-of-range name reported).

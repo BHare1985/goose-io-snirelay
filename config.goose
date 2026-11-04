@@ -46,8 +46,10 @@ struct Listener {
 // What a route matches. The first route that matches, in config order, wins.
 enum Match {
     Any,                               // every connection on the listener (port routing)
-    Sni { name: u8[..253], too_long: bool = false },        // exact, case-insensitive, trailing dot ignored
-    SniSuffix { name: u8[..253], too_long: bool = false },  // "example.com": any name ending in ".example.com"
+    // The name is `len` bytes of Config.names starting at `at` (names are stored once, in one pool, not 253 bytes per route).
+    // `too_long` is set when the name was longer than 253 bytes or did not fit in the pool; check() reports it.
+    Sni { at: u16, len: u8 = 0, too_long: bool = false },        // exact, case-insensitive, trailing dot ignored
+    SniSuffix { at: u16, len: u8 = 0, too_long: bool = false },  // "example.com": any name ending in ".example.com"
     NoSni,                             // a ClientHello without server_name, or not TLS at all
 }
 
@@ -73,6 +75,7 @@ struct Limits {
 struct Config {
     listeners: Listener[..16],
     routes: Route[..256],
+    names: u8[..8192],                // the SNI names of the routes, one after the other (sni_route, sni_suffix_route)
     targets: Target[..64],             // what Forward routes point at: shared, so 8 addresses are not repeated per route
     limits: Limits = Limits { .. },
     fenced_tags: u16[..16],            // tags that start with no deadline, so their connections are closed until one arrives (RT-6e)
@@ -88,15 +91,28 @@ fn add_target(cfg: Config&, t: Target) -> u16 {
 }
 
 // Route constructors, so a config reads like a table.
-fn sni_route(listener: u16, name: const u8[:], action: Action) -> Route {
-    var n = Match.Sni { name: [] };
-    if name.len > n.name.cap {
-        n.too_long = true;
-        n.name.append(name[..n.name.cap]);
-    } else {
-        n.name.append(name);
-    }
-    return Route { listener: listener, on: n, action: action };
+// Stores a route name in the pool and returns where it went. A name longer than 253 bytes is cut and flagged, and a
+// name that does not fit in the pool is stored as empty and flagged; check() reports both.
+fn _store_name(cfg: Config&, name: const u8[:]) -> u16, u8, bool {
+    var take = name.len;
+    var flagged = false;
+    if take > 253 { take = 253; flagged = true; }
+    if cfg.names.len + take > cfg.names.cap { take = 0; flagged = true; }
+    let at = cfg.names.len;
+    cfg.names.append(name[..take]);
+    return at as u16, take as u8, flagged;
+}
+
+// The bytes of a stored name.
+fn name_text(cfg: const Config&, at: u16, len: u8) -> const u8[:] {
+    let from = at as i64;
+    let to = from + len;
+    return cfg.names[from..to];
+}
+
+fn sni_route(cfg: Config&, listener: u16, name: const u8[:], action: Action) -> Route {
+    let at, len, flagged = _store_name(cfg, name);
+    return Route { listener: listener, on: Match.Sni { at: at, len: len, too_long: flagged }, action: action };
 }
 
 fn any_route(listener: u16, action: Action) -> Route {
@@ -105,15 +121,9 @@ fn any_route(listener: u16, action: Action) -> Route {
 
 // A SniSuffix route. Users type "*.example.com" (as on a wildcard certificate), the stored form is the
 // bare "example.com": it matches names below it ("a.example.com"), never "example.com" itself.
-fn sni_suffix_route(listener: u16, name: const u8[:], action: Action) -> Route {
+fn sni_suffix_route(cfg: Config&, listener: u16, name: const u8[:], action: Action) -> Route {
     var bare = name;
     if bare.len >= 2 && bare[0] == '*' && bare[1] == '.' { bare = bare[2..]; }
-    var n = Match.SniSuffix { name: [] };
-    if bare.len > n.name.cap {
-        n.too_long = true;
-        n.name.append(bare[..n.name.cap]);
-    } else {
-        n.name.append(bare);
-    }
-    return Route { listener: listener, on: n, action: action };
+    let at, len, flagged = _store_name(cfg, bare);
+    return Route { listener: listener, on: Match.SniSuffix { at: at, len: len, too_long: flagged }, action: action };
 }

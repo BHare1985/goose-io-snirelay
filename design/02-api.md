@@ -28,7 +28,7 @@ and read with `match ev { Opened o => o.conn, … }`; there is no `switch`, `whi
 
 Plain data. Build it by hand or from a file, `check()` it, pass the same value to every worker.
 It is flat (no references), so it travels as a `thread_fn` argument: a config with 256 routes is
-about 95 KB (it was 205 KB before routes pointed at a shared target table) and copies fine [V m0/o24]; a worker process holds a few copies of it, so its size is idle memory.
+about 40 KB (it was 205 KB before routes pointed at a shared target table and a name pool) and copies fine [V m0/o24]; a worker process holds a few copies of it, so its size is idle memory.
 
 ```goose
 struct Addr { text: u8[..48] }          // "0.0.0.0:443", "[::]:8080"; parsed at start(), checked by check(); 47 bytes is the longest valid text
@@ -42,8 +42,8 @@ struct Listener { id: u16, addr: Addr, inspect: Inspect = Inspect.None }
 
 enum Match {
     Any,                                // every connection on the listener (port routing)
-    Sni { name: u8[..253] },            // exact, case-insensitive, trailing dot ignored
-    SniSuffix { name: u8[..253] },      // "example.com": any name ending in ".example.com"
+    Sni { at: u16, len: u8 },           // exact, case-insensitive, trailing dot ignored; the name is Config.names[at..at+len]
+    SniSuffix { at: u16, len: u8 },     // "example.com": any name ending in ".example.com"; stored once, in the pool
     NoSni,                              // a ClientHello without server_name, or not TLS at all
 }
 enum Action {
@@ -58,9 +58,10 @@ struct Limits {
     half_close_timeout_ms: i64 = 30000,   inspect_timeout_ms: i64 = 5000,
     max_conns_per_worker: i64 = 65536,    buffer_size: i64 = 32768,    buffers_per_worker: i64 = 4096,
 }
-struct Config { listeners: Listener[..16], routes: Route[..256], targets: Target[..64], limits: Limits = Limits { .. }, fenced_tags: u16[..16] }
+struct Config { listeners: Listener[..16], routes: Route[..256], names: u8[..8192], targets: Target[..64], limits: Limits = Limits { .. }, fenced_tags: u16[..16] }
 
-fn sni_route(listener: u16, name: const u8[:], action: Action) -> Route    // table-like constructors
+fn sni_route(cfg: Config&, listener: u16, name: const u8[:], action: Action) -> Route    // table-like constructors; they store the name in cfg.names
+fn sni_suffix_route(cfg: Config&, listener: u16, name: const u8[:], action: Action) -> Route   // "*.example.com" is stored as "example.com"
 fn any_route(listener: u16, action: Action) -> Route
 fn check(cfg: Config, problems: u8[>..]&) -> bool   // appends one line per problem, naming the field
 ```

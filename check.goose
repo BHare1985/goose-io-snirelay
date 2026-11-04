@@ -38,11 +38,13 @@ fn check(cfg: const Config&, problems: u8[>..]&) -> bool {
         match r.on {
             Any => {},
             Sni s => {
-                if s.too_long { format(problems, "routes[", i, "].on: name longer than 253 bytes\n"); }
+                if (s.at as i64) + s.len > cfg.names.len { format(problems, "routes[", i, "].on: the name is outside Config.names\n"); }
+                if s.too_long { format(problems, "routes[", i, "].on: name longer than 253 bytes or Config.names is full\n"); }
                 _check_sni_listener(problems, cfg, i, at, "Sni");
             },
             SniSuffix s => {
-                if s.too_long { format(problems, "routes[", i, "].on: name longer than 253 bytes\n"); }
+                if (s.at as i64) + s.len > cfg.names.len { format(problems, "routes[", i, "].on: the name is outside Config.names\n"); }
+                if s.too_long { format(problems, "routes[", i, "].on: name longer than 253 bytes or Config.names is full\n"); }
                 _check_sni_listener(problems, cfg, i, at, "SniSuffix");
             },
             NoSni => { _check_sni_listener(problems, cfg, i, at, "NoSni"); },

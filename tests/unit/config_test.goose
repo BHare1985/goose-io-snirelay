@@ -42,10 +42,8 @@ fn good() -> tcprouter::Config {
     listener(cfg, 1, "0.0.0.0:5432", tcprouter::Inspect.None);
     listener(cfg, 2, "[::]:443", tcprouter::Inspect.Sni);
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::target(["10.0.0.5:5432", "[2001:db8::1]:5432"])) }));
-    cfg.routes.push(tcprouter::sni_route(2, "api.example.com", tcprouter::Action.Handle { tag: 1 }));
-    var suffix = tcprouter::Match.SniSuffix { name: [] };
-    suffix.name.append("example.com");
-    cfg.routes.push(tcprouter::Route { listener: 2, on: suffix, action: tcprouter::Action.Close });
+    cfg.routes.push(tcprouter::sni_route(cfg, 2, "api.example.com", tcprouter::Action.Handle { tag: 1 }));
+    cfg.routes.push(tcprouter::sni_suffix_route(cfg, 2, "example.com", tcprouter::Action.Close));
     cfg.routes.push(tcprouter::Route { listener: 2, on: tcprouter::Match.NoSni, action: tcprouter::Action.Close });
     cfg.routes.push(tcprouter::any_route(2, tcprouter::Action.Close));
     return cfg;
@@ -99,10 +97,8 @@ fn test_sni_rows_without_inspect() {
     // C1: all three SNI kinds are refused on a listener that does not read the ClientHello.
     var cfg = tcprouter::Config { .. };
     listener(cfg, 1, "0.0.0.0:80", tcprouter::Inspect.None);
-    cfg.routes.push(tcprouter::sni_route(1, "api.example.com", tcprouter::Action.Close));     // routes[0]
-    var suffix = tcprouter::Match.SniSuffix { name: [] };
-    suffix.name.append("example.com");
-    cfg.routes.push(tcprouter::Route { listener: 1, on: suffix, action: tcprouter::Action.Close });   // routes[1]
+    cfg.routes.push(tcprouter::sni_route(cfg, 1, "api.example.com", tcprouter::Action.Close));     // routes[0]
+    cfg.routes.push(tcprouter::sni_suffix_route(cfg, 1, "example.com", tcprouter::Action.Close));   // routes[1]
     cfg.routes.push(tcprouter::Route { listener: 1, on: tcprouter::Match.NoSni, action: tcprouter::Action.Close });  // routes[2]
     any_to_close(cfg, 1);                                                                      // routes[3]: fine
     let r, ok = report(cfg);
@@ -169,7 +165,7 @@ fn test_all_problems() {
     var cfg = tcprouter::Config { .. };
     listener(cfg, 1, "0.0.0.0:80", tcprouter::Inspect.None);
     listener(cfg, 1, "nonsense", tcprouter::Inspect.None);                                    // dup id + bad address
-    cfg.routes.push(tcprouter::sni_route(1, "api.example.com", tcprouter::Action.Close));    // sni without inspect
+    cfg.routes.push(tcprouter::sni_route(cfg, 1, "api.example.com", tcprouter::Action.Close));    // sni without inspect
     any_to_close(cfg, 8);                                                                     // unknown listener
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::Target { addrs: [] }) }));
     let r, ok = report(cfg);
@@ -211,7 +207,7 @@ fn test_overflows() {
     listener(cfg, 1, "0.0.0.0:80", tcprouter::Inspect.Sni);
     var long: u8[>..] = [];
     for i in 300 { long.push('a'); }
-    cfg.routes.push(tcprouter::sni_route(1, long, tcprouter::Action.Close));                         // routes[0]: name too long
+    cfg.routes.push(tcprouter::sni_route(cfg, 1, long, tcprouter::Action.Close));                         // routes[0]: name too long
     let nine = tcprouter::add_target(cfg, tcprouter::target(["1.1.1.1:1", "1.1.1.2:1", "1.1.1.3:1", "1.1.1.4:1", "1.1.1.5:1",
                                                              "1.1.1.6:1", "1.1.1.7:1", "1.1.1.8:1", "1.1.1.9:1"]));
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: nine }));                // routes[1]: nine targets
@@ -242,7 +238,25 @@ fn test_target_table() {
     check(full.targets.len == 64 && !ok3 && mentions(r3, "routes[0].action"), "RT-1c a 65th target does not fit: its index is rejected by the check");
 }
 
+// Names live in one pool; one that does not fit is flagged where it went wrong, and a hand-built Match pointing outside the pool is reported.
+fn test_name_pool() {
+    var cfg = tcprouter::Config { .. };
+    listener(cfg, 1, "0.0.0.0:443", tcprouter::Inspect.Sni);
+    var name: u8[>..] = [];
+    for i in 250 { name.push('a'); }
+    for k in 70 { cfg.routes.push(tcprouter::sni_route(cfg, 1, name, tcprouter::Action.Close)); }      // 70 x 250 > 16384
+    let r, ok = report(cfg);
+    check(!ok && cfg.names.len <= cfg.names.cap, "RT-1c names that no longer fit in the pool fail the check (and did not abort)");
+    check(mentions(r, "routes[69].on") && !mentions(r, "routes[0].on"), "RT-1c ... only the routes whose name did not fit are reported");
+    var bad = tcprouter::Config { .. };
+    listener(bad, 1, "0.0.0.0:443", tcprouter::Inspect.Sni);
+    bad.routes.push(tcprouter::Route { listener: 1, on: tcprouter::Match.Sni { at: 100, len: 20 }, action: tcprouter::Action.Close });
+    let r2, ok2 = report(bad);
+    check(!ok2 && mentions(r2, "routes[0].on"), "RT-1c a Match whose name lies outside Config.names is reported");
+}
+
 fn main() {
+    test_name_pool();
     test_target_table();
     test_overflows();
     test_good();
