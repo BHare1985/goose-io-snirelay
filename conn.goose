@@ -108,7 +108,7 @@ fn _close_reason_index(r: CloseReason) -> i64 {
 // spawn() asks, before any worker exists, whether each listener address can be bound by a plain socket.
 // If another process holds the port this is an error here and now, instead of workers silently sharing
 // the port with it through SO_REUSEPORT (RT-1d).
-fn _probe_listeners(cfg: Config) {
+fn _probe_listeners(cfg: const Config&) {
     for li in cfg.listeners.len {
         var p = _ParsedAddress { false, [0; 16], 0 };
         let text = cfg.listeners[li].addr.text;

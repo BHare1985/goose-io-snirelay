@@ -107,7 +107,7 @@ root struct Worker {
 // Binds this worker's listeners (SO_REUSEPORT) and prepares its tables. Returns false and fills
 // w.error (naming the address and errno) instead of aborting when it cannot, e.g. the port is
 // taken (RT-1d). Never calls abort or exit (RT-1e).
-fn start(w: Worker&, cfg: Config, index: i64) -> bool {
+fn start(w: Worker&, cfg: const Config&, index: i64) -> bool {
     w.cfg = cfg;
     w.index = index;
     if _spawn_error.len > 0 {                          // spawn() found a listener it cannot bind
@@ -189,7 +189,7 @@ var _spawn_error: u8[..200] = [];
 // wait_for_signal_then_drain sees them) and checks that every listener address can be bound by a
 // plain socket, so a port held by another process is an error and not a silently shared port (RT-1d).
 // It also creates one message pipe per worker, before any worker starts (messages.goose). At most 64 workers. Returns the thread ids.
-fn spawn<W>(cfg: Config, n: i64) -> i64[>..] {
+fn spawn<W>(cfg: const Config&, n: i64) -> i64[>..] {
     _signal_fd = c_signals_open();
     _probe_listeners(cfg);
     _worker_count = if n < _MAX_WORKERS { n } else { _MAX_WORKERS };
