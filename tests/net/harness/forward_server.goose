@@ -6,7 +6,10 @@
 //                    [--route LISTEN=TARGET[,TARGET…] …]
 //                    [--workers 1] [--buffers 4096] [--buffer-size 16384] [--stat-ms 1000]
 //                    [--inspect-listen ADDR] [--sni NAME=T[,T]] [--sni-suffix NAME=T[,T]] [--sni-none T[,T]] [--sni-any T[,T]]
+//                    [--control] [--drain-ms N]
 //                    [--connect-timeout-ms N] [--inspect-timeout-ms N] [--idle-timeout-ms N] [--half-close-timeout-ms N]
+// --control: read commands from stdin on a control thread (`drain MS`), and exit when the workers have drained; without it the
+// program waits for SIGTERM/SIGINT, drains with --drain-ms (default 5000) and exits.
 // --inspect-listen: one listener with `inspect: Sni`; the --sni* flags add its routes, in the order given:
 //   --sni exact name, --sni-suffix names below a domain, --sni-none no name / not TLS, --sni-any everything else.
 // --listen/--to: every --listen forwards to every --to. --route: one listener with its own targets
@@ -31,6 +34,8 @@ root struct Options {
     sni_specs: u8[][>..] = [],          // "sni:NAME=T,T", "suffix:NAME=T", "none:T", "any:T", in flag order
     connect_timeout_ms: i64 = 0,
     inspect_timeout_ms: i64 = 0,
+    control: bool = false,
+    drain_ms: i64 = 5000,
     idle_timeout_ms: i64 = 0,
     half_close_timeout_ms: i64 = 0,
     workers: i64 = 1,
@@ -96,6 +101,24 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
     tcprouter::serve(w) { w, ev => on_event(w, ev, index, every_ms, last); };
 }
 
+// --- the control thread ---------------------------------------------------------------------------------------------
+
+// Reads commands from stdin and turns them into messages to the workers: the pattern a real program uses for its control
+// protocol. It runs after spawn(), so it has the message pipes (globals are copied to a thread when it starts).
+thread_fn control() {
+    var line: u8[>..] = [];
+    while read_line(line) {
+        let space = find(line, " ");
+        let verb = if space < 0 { line[..] } else { line[..space] };
+        let rest = if space < 0 { line[line.len..] } else { line[space + 1..] };
+        if verb == "drain" {
+            let ms, ok = parse_int(rest);
+            if ok { tcprouter::post(tcprouter::Message.Drain { deadline_ms: ms }); }
+        }
+        line.clear();
+    }
+}
+
 // --- main -------------------------------------------------------------------------------------------------
 
 fn parse_options(o: Options&) {
@@ -103,6 +126,7 @@ fn parse_options(o: Options&) {
     var i = 1;
     while i < a.len {
         let flag = a[i];
+        if flag == "--control" { o.control = true; i++; continue; }
         if i + 1 >= a.len { die(str(flag, " needs a value")); }
         let value = a[i + 1];
         if flag == "--listen" { o.listens.push(value); }
@@ -115,6 +139,7 @@ fn parse_options(o: Options&) {
         else if flag == "--sni-any" { o.sni_specs.push(str("any:", value)); }
         else if flag == "--connect-timeout-ms" { o.connect_timeout_ms = number(value, flag); }
         else if flag == "--inspect-timeout-ms" { o.inspect_timeout_ms = number(value, flag); }
+        else if flag == "--drain-ms" { o.drain_ms = number(value, flag); }
         else if flag == "--idle-timeout-ms" { o.idle_timeout_ms = number(value, flag); }
         else if flag == "--half-close-timeout-ms" { o.half_close_timeout_ms = number(value, flag); }
         else if flag == "--workers" { o.workers = number(value, flag); }
@@ -199,9 +224,14 @@ fn main() {
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
 
-    tcprouter::spawn(cfg, o.workers, worker);
+    let ids = tcprouter::spawn(cfg, o.workers, worker);
     var failed = 0;
     for i in o.workers { if !qget<Started>().ok { failed++; } }
     if failed > 0 { exit(1); }                    // a worker could not start (for instance, the port is taken)
-    tcprouter::wait_for_signal_then_drain(5000);
+    if o.control {
+        thread_spawn(control);
+        for id in ids { thread_wait(id); }        // returns when every worker has drained
+    } else {
+        tcprouter::wait_for_signal_then_drain(o.drain_ms);
+    }
 }

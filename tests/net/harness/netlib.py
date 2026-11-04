@@ -203,7 +203,7 @@ class Server:
             if self.nofile:
                 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
                 resource.setrlimit(resource.RLIMIT_NOFILE, (min(self.nofile, hard), hard))
-        self.proc = subprocess.Popen(self.args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        self.proc = subprocess.Popen(self.args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                      preexec_fn=limits)
         threading.Thread(target=self._read_out, daemon=True).start()
         threading.Thread(target=self._read_err, daemon=True).start()
@@ -230,6 +230,20 @@ class Server:
     def _read_err(self):
         for line in self.proc.stderr:
             self.stderr.append(line.rstrip())
+
+    def command(self, line):
+        """Sends a command line to the server's control thread (forward_server --control)."""
+        self.proc.stdin.write(line + "\n")
+        self.proc.stdin.flush()
+
+    def wait_exit(self, timeout):
+        """Waits for the process to end; returns (seconds waited, exit status) or (seconds, None) if it did not."""
+        t0 = time.time()
+        try:
+            self.proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return time.time() - t0, None
+        return time.time() - t0, self.proc.returncode
 
     def alive(self):
         return self.proc.poll() is None
@@ -303,6 +317,8 @@ class Server:
         if not hasattr(self, "proc"):
             return                          # start() never got as far as a process
         if self.proc.poll() is None:
+            try: self.proc.stdin.close()
+            except Exception: pass
             self.proc.send_signal(signal.SIGTERM)
             try:
                 self.proc.wait(timeout=8)

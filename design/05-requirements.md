@@ -84,9 +84,9 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-8a | `Drain`: listeners close at once; a new process on the same port gets all new connections | v1 | `drain_test` | design |
-| RT-8b | `Drain` returns when the last connection closes, or closes the rest at the deadline | v1 | `drain_test` | design |
-| RT-8c | SIGTERM and SIGINT start a drain (via `wait_for_signal_then_drain`) | v1 | `drain_test` | design |
+| RT-8a | `Drain`: listeners close at once; a new process on the same port gets all new connections | v1 | `drain_test` | red (awaiting approval) |
+| RT-8b | `Drain` returns when the last connection closes, or closes the rest at the deadline | v1 | `drain_test` | red (awaiting approval) |
+| RT-8c | SIGTERM and SIGINT start a drain (via `wait_for_signal_then_drain`) | v1 | `drain_test` | red (awaiting approval) |
 
 ## RT-9 Handler mode
 
