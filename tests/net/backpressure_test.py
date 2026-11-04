@@ -6,8 +6,9 @@
 # RT-5c: the backend accepts and never reads. A client offers 1 GB. The proxy must stop reading from the client
 #        (the client's sends stall), its memory must stay flat, and once the backend reads, every byte arrives in order.
 #        The measured numbers are printed on every run, so the ceilings can be tightened later.
-# RT-5d: a pool of 4 buffers and 100 concurrent echo clients: all finish, the pool really ran dry, nothing aborts.
-import hashlib, os, socket, sys, time, threading
+# RT-5d: a pool of 4 buffers, 100 transfers to a backend that stops reading, and 20 echo clients that arrive while the
+#        pool is dry: the pool really runs dry, the others wait, everything finishes byte-exact, nothing aborts.
+import hashlib, os, socket, struct, sys, time, threading
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "harness"))
 from netlib import *
 
@@ -79,35 +80,69 @@ def rt5c():
         server.stop(); backend.stop()
 
 def rt5d():
-    bport, pport = free_port(), free_port()
-    backend = EchoBackend(bport, backlog=1024)
-    server = Server([f"127.0.0.1:{pport}"], [f"127.0.0.1:{bport}"], workers=1, buffers=4, stat_ms=100)
+    # A buffer is pinned only while the DESTINATION is not taking its bytes: a loop that reads and writes at once
+    # never holds more than one. So listener A forwards to a backend that does not read for 2 s: each of its 100
+    # connections pins a buffer as soon as the kernel buffers between them fill, which needs far more than the
+    # pool of 4. Listener B forwards to an echo backend; its 20 clients arrive while the pool is dry and must wait,
+    # not fail. At 2 s the stalled backend reads everything: every buffer comes back, and all 120 transfers must
+    # finish byte-exact. The worker must not abort at any point.
+    a_port, b_port, pa, pb = free_port(), free_port(), free_port(), free_port()
+    hold = HoldBackend(a_port, backlog=1024)
+    echo = EchoBackend(b_port, backlog=1024)
+    server = Server([], [], workers=1, buffers=4, stat_ms=100,
+                    routes=[(f"127.0.0.1:{pa}", [f"127.0.0.1:{a_port}"]), (f"127.0.0.1:{pb}", [f"127.0.0.1:{b_port}"])])
+    SIZE = 4 * MB
     try:
         server.start().wait_ready()
-        def client(i):
-            c = connect(pport, timeout=120)
+        def stalled_client(i):
+            c = connect(pa, timeout=120)
+            c.sendall(struct.pack(">I", i))
+            sent = hashlib.sha256()
+            send_stream(c, 9000 + i, SIZE, sent)
+            c.shutdown(socket.SHUT_WR)
+            c.close()
+            return sent.hexdigest()
+        def echo_client(i):
+            c = connect(pb, timeout=120)
             sent, got = hashlib.sha256(), hashlib.sha256()
             res = {}
             r = threading.Thread(target=lambda: res.__setitem__("n", read_all(c, got)))
             r.start()
-            send_stream(c, 9000 + i, MB, sent)
+            send_stream(c, 7000 + i, MB, sent)
             c.shutdown(socket.SHUT_WR)
             r.join(120)
             c.close()
             return res.get("n") == MB and sent.hexdigest() == got.hexdigest()
-        results = run_threads([lambda i=i: client(i) for i in range(100)])
-        ok = sum(1 for r in results if r is True)
-        t.check(ok == 100, f"RT-5d 100 echo clients x 1 MB through a 4-buffer pool all finish intact ({ok}/100)")
+
+        sent_digests = {}
+        stalled = [threading.Thread(target=lambda i=i: sent_digests.__setitem__(i, stalled_client(i)), daemon=True) for i in range(100)]
+        for th in stalled: th.start()
+        time.sleep(1.0)                                   # the stalled connections fill their kernel buffers and pin the pool
+        waits_mid = server.total("buffer_waits")
+        pinned_mid = server.total("buffers_in_use")
+        echo_results = []
+        echoers = [threading.Thread(target=lambda i=i: echo_results.append(echo_client(i)), daemon=True) for i in range(20)]
+        for th in echoers: th.start()
+        time.sleep(1.0)
+        t.check(pinned_mid == 4, f"RT-5d while their backend does not read, the stalled connections pin all 4 buffers (buffers_in_use={pinned_mid})")
+        t.check(echo_results == [], "RT-5d the echo clients are waiting, not failed and not served yet while the pool is dry")
+        t.check(server.alive() and not server.stderr, f"RT-5d the worker did not abort while the pool was dry ({server.stderr[:2]})")
+        # Release: the stalled backend reads everything; buffers return; everyone finishes.
+        drained = hold.drain_all()
+        for th in stalled: th.join(120)
+        for th in echoers: th.join(120)
+        ok_stalled = sum(1 for i in range(100) if drained.get(i) == (SIZE, sent_digests.get(i)))
+        t.check(ok_stalled == 100, f"RT-5d once the backend reads, all 100 stalled transfers arrive byte-exact ({ok_stalled}/100)")
+        t.check(len(echo_results) == 20 and all(echo_results), f"RT-5d the 20 echo clients that waited for buffers all finish intact ({sum(1 for r in echo_results if r)}/20)")
         waits = server.wait_stat("buffer_waits", lambda v: v > 0, timeout=3)
-        t.note(f"RT-5d measured: buffer_waits={waits}, max buffers_in_use={server.max_buffers_in_use} of 4")
+        t.note(f"RT-5d measured: buffer_waits={waits} (after 1 s: {waits_mid}), max buffers_in_use={server.max_buffers_in_use} of 4")
         t.check(waits > 0, f"RT-5d the pool really ran dry: reads had to wait (buffer_waits={waits})")
         t.check(server.max_buffers_in_use <= 4, f"RT-5d buffers_in_use never exceeded the pool of 4 (max {server.max_buffers_in_use})")
-        t.check(server.alive() and not server.stderr, f"RT-5d the worker did not abort ({server.stderr[:2]})")
-        # A client that connects after the storm is served: buffers came back.
-        c = connect(pport, timeout=10); c.sendall(b"after"); got = recv_exact(c, 5); c.close()
-        t.check(got == b"after", "RT-5d a client that connects afterwards is served")
+        t.check(server.wait_stat("buffers_in_use", lambda v: v == 0, timeout=5) == 0, "RT-5d every buffer is back in the pool afterwards")
+        c = connect(pb, timeout=10); c.sendall(b"after"); got = recv_exact(c, 5); c.close()
+        t.check(got == b"after" and server.alive() and not server.stderr, "RT-5d a client that connects afterwards is served; the worker never aborted")
     finally:
-        server.stop(); backend.stop()
+        server.stop(); hold.stop(); echo.stop()
 
 t.run(rt5c)
 t.run(rt5d)
