@@ -64,6 +64,17 @@ fn any_route(listener: u16, action: Action) -> Route
 fn check(cfg: Config, problems: u8[>..]&) -> bool   // appends one line per problem, naming the field
 ```
 
+```goose
+// route.goose. Pure; the engine and the tests call the same function.
+fn match_route(cfg: const Config&, listener: u16, hello: Hello) -> const Route?
+```
+
+`match_route` returns a reference to the winning route inside `cfg` (`cfg.routes.index_of(route)` is its
+index), or null for "no route: close". It is `const Route?` and not `i64?` because in Goose `T?` is a
+nullable *reference*: an `i64?` returned from a function would have to point at an integer that outlives the
+call, and the compiler rejects a fresh one [V]. `cfg` is passed by reference (66 KB is not copied per
+connection).
+
 Routes are checked in order; the first match wins. A listener with `inspect: Sni` waits for the
 ClientHello (doc 04), then matches `Sni`, `SniSuffix`, `NoSni`, `Any` rows in config order.
 **The ClientHello bytes are not consumed**: a forwarded connection's backend sees the client's

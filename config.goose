@@ -4,21 +4,30 @@ namespace tcprouter;
 
 // A socket address as written by a person: "0.0.0.0:443", "[::]:8080", "10.0.0.5:5432". It is
 // parsed when a worker starts, so building a Config never fails; check() reports bad text.
-struct Addr { text: u8[..64] }
+// `too_long` is set when the text did not fit in 64 bytes; check() reports it. Building a Config never aborts.
+struct Addr { text: u8[..64], too_long: bool = false }
 
 fn addr(text: const u8[:]) -> Addr {
     var a = Addr { text: [] };
-    a.text.append(text);       // too long for 64 bytes is caught by check(), not here
+    if text.len > a.text.cap {
+        a.too_long = true;
+        a.text.append(text[..a.text.cap]);
+    } else {
+        a.text.append(text);
+    }
     return a;
 }
 
 // Where a connection's bytes go when the engine forwards them: tried in order, rotating the
 // first choice from one connection to the next (the built-in policy).
-struct Target { addrs: Addr[..8] }
+// `too_many` is set when more than 8 addresses were given; check() reports it.
+struct Target { addrs: Addr[..8], too_many: bool = false }
 
 fn target(names: const u8[:][:]) -> Target {
     var t = Target { addrs: [] };
-    for n in names { t.addrs.push(addr(n)); }
+    for n in names {
+        if t.addrs.len == t.addrs.cap { t.too_many = true; } else { t.addrs.push(addr(n)); }
+    }
     return t;
 }
 
@@ -34,8 +43,8 @@ struct Listener {
 // What a route matches. The first route that matches, in config order, wins.
 enum Match {
     Any,                               // every connection on the listener (port routing)
-    Sni { name: u8[..253] },           // exact, case-insensitive, trailing dot ignored
-    SniSuffix { name: u8[..253] },     // "example.com": any name ending in ".example.com"
+    Sni { name: u8[..253], too_long: bool = false },        // exact, case-insensitive, trailing dot ignored
+    SniSuffix { name: u8[..253], too_long: bool = false },  // "example.com": any name ending in ".example.com"
     NoSni,                             // a ClientHello without server_name, or not TLS at all
 }
 
@@ -67,7 +76,12 @@ struct Config {
 // Route constructors, so a config reads like a table.
 fn sni_route(listener: u16, name: const u8[:], action: Action) -> Route {
     var n = Match.Sni { name: [] };
-    n.name.append(name);
+    if name.len > n.name.cap {
+        n.too_long = true;
+        n.name.append(name[..n.name.cap]);
+    } else {
+        n.name.append(name);
+    }
     return Route { listener: listener, on: n, action: action };
 }
 
