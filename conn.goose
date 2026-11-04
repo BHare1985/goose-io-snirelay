@@ -48,6 +48,7 @@ struct _ConnectionSlot {
     client_fd: i32,
     server_fd: i32,
     client_mask: u32,            // the epoll interest set now on each fd
+    client_registered: bool,     // the client is in epoll: forwarded connections join it when the connect finishes (one syscall less)
     server_mask: u32,
     listener: u16,
     user: u32,
@@ -194,6 +195,21 @@ fn _direction_has_pending_bytes(d: _Direction) -> bool { return d.len > d.pos; }
 
 // Sets each fd's epoll interest to what the slot's state needs: read a source only when its direction has
 // nothing unwritten and is not waiting for a buffer; wait for writability only where bytes are pending.
+// Sets the client's epoll interest: the first non-empty interest adds it, later changes modify it.
+fn _set_client_interest(w: Worker&, i: i64, mask: u32) {
+    let s .= w._connection_slots[i];
+    if s.client_registered {
+        if mask == s.client_mask { return; }
+        c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, mask, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
+    } else {
+        if mask == 0 { return; }
+        let rc = c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, s.client_fd, mask, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
+        if rc < 0 { return; }                               // out of epoll memory: like a failed MOD, the idle timeout ends it
+        s.client_registered = true;
+    }
+    s.client_mask = mask;
+}
+
 fn _update_epoll_interest(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
     if !s.live { return; }
@@ -201,10 +217,7 @@ fn _update_epoll_interest(w: Worker&, i: i64) {
         var m: u32 = 0;
         if _handler_can_read(s) { m |= c_EPOLLIN; }
         if s.out_count > 0 { m |= c_EPOLLOUT; }
-        if m != s.client_mask {
-            c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, m, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
-            s.client_mask = m;
-        }
+        _set_client_interest(w, i, m);
         return;
     }
     if s.state != _STATE_FORWARDING { return; }
@@ -214,10 +227,7 @@ fn _update_epoll_interest(w: Worker&, i: i64) {
     if _direction_has_pending_bytes(s.down) { cm |= c_EPOLLOUT; }
     if _direction_can_read(s.down) { sm |= c_EPOLLIN; }
     if _direction_has_pending_bytes(s.up) { sm |= c_EPOLLOUT; }
-    if cm != s.client_mask {
-        c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, cm, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
-        s.client_mask = cm;
-    }
+    _set_client_interest(w, i, cm);
     if sm != s.server_mask {
         c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.server_fd, sm, _pack_event_data(_EVENT_KIND_SERVER, i, s.gen));
         s.server_mask = sm;
@@ -298,7 +308,7 @@ fn _reject_connection(w: Worker&, fd: i32, reason: CloseReason) {
 fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool, now: i64) -> _ConnectionSlot {
     return _ConnectionSlot {
         gen: gen, live: true, state: if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING }, client_fd: fd, server_fd: -1,
-        client_mask: if inspect { c_EPOLLIN } else { 0 }, server_mask: 0, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
+        client_mask: if inspect { c_EPOLLIN } else { 0 }, client_registered: false, server_mask: 0, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
         inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tag: 0, target_gen: 0, override_target: -1,
         out_buffers: [-1; 4], out_lengths: [0; 4], out_count: 0, out_pos: 0, consumed: false, paused: false,
         data_pending: false, want_writable: false, closing: false, closing_reason: CloseReason.PeerClosed,
@@ -325,10 +335,14 @@ fn _new_connection(w: Worker&, li: i64, fd: i32) {
     let s .= w._connection_slots[i];
     w._stats.open++;
 
-    // The client is registered at once. While a hello is awaited it is watched for input; otherwise it has no
-    // interest at all until the server answers, so a failed connect can be retried with its bytes untouched.
-    let rc = c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, fd, s.client_mask, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
-    if rc < 0 { _close_connection(w, i, CloseReason.Error); return; }
+    // While a hello is awaited the client is watched for input at once. Otherwise it joins epoll only when the server
+    // answers (_set_client_interest), so a failed connect can be retried with its bytes untouched; a client that hangs
+    // up in the meantime is noticed then, at the latest when the connect timeout ends.
+    if inspect {
+        let rc = c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, fd, s.client_mask, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
+        if rc < 0 { _close_connection(w, i, CloseReason.Error); return; }
+        s.client_registered = true;
+    }
     if !inspect {
         let nothing: Hello = Hello.NoSni;          // nobody read a hello: only Any routes can match
         _route_and_connect(w, i, nothing);
@@ -431,10 +445,7 @@ fn _start_connecting(w: Worker&, i: i64, count: i64) {
     w._round_robin++;
     s.attempts = 0;
     _end_inspection(w, i);
-    if s.client_mask != 0 {
-        c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, 0, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
-        s.client_mask = 0;
-    }
+    _set_client_interest(w, i, 0);
     s.state = _STATE_CONNECTING;
     _attempt_connect(w, i);
 }
