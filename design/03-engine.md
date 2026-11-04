@@ -226,3 +226,24 @@ benchmarks, so tcprouter does not carry a second engine.
   new process can bind the port: RT-8a), lets open connections finish, and records the deadline. Once per loop pass the worker checks:
   nothing open means `serve` returns; past the deadline the rest are closed as `Drained` (their Closed events are delivered) and `serve`
   returns. `wait_for_signal_then_drain` reads the signalfd, posts the drain and `thread_wait`s for every worker.
+
+## 16. As built: tags, deadlines, fences and stats across workers (M4 group C)
+
+- **A tag and a generation come from the target** (`Target.tag`, `Target.gen`, or the tag of a `Handle` route) and are copied into the
+  slot. Tag 0 is never fenced. Each worker keeps a small table of `(tag, until_ms)`; a tag with no entry is free, an entry with
+  `until_ms` in the future allows connections, and `until_ms == 0` (a tag from `Config.fenced_tags` with no deadline yet) fences it.
+- **The latest deadline wins** (`Message.Deadline`): a later `until_ms` renews, an earlier or equal one changes nothing, so a delayed or
+  duplicate message cannot shorten or stretch anything. Revoking is `CloseTagged` or a fence, never a smaller deadline.
+- **Where the deadline is enforced.** (1) When a connection is routed: a fenced or expired tag is closed at once. (2) Once per pass of
+  the loop, after the messages and before any event is dispatched (`_enforce_deadlines`): the slot table is scanned only when some
+  deadline has just expired (`_deadline_scan_at`), so a worker with no deadlines, or none due, pays one comparison. A process that was
+  frozen across a deadline therefore closes the tag's connections before it looks at the readable data that woke it (RT-6a).
+  (3) Before every write in the forwarding path, in both directions (to the server and to the client): `_flush_direction` checks the tag
+  with the pass's clock reading and drops bytes under an expired tag.
+- **`CloseTagged { tag, gen }`** closes (as `Fenced`) every connection of the tag whose target generation is `<= gen`, in the message
+  handler, so it runs before the events of the same pass (RT-6b).
+- **Stats across workers.** `Message.Stats` makes each worker `qput` a `_StatsReply { worker, stats }`; `gather_stats(workers)` posts one
+  and adds up that many replies (one caller at a time: the replies share a queue). Sessions per tag are counted by walking the slots when
+  `stats(w)` is called, not kept up to date.
+- **Measured:** message_test 13 of 13 (exact sums over 4 workers, 390 connections); deadline_test 35 of 35 including the SIGSTOP/SIGCONT case
+  with traffic in both directions.

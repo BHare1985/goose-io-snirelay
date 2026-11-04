@@ -58,7 +58,8 @@ struct _ConnectionSlot {
     route_index: u16,            // the route the connection took (an index into cfg.routes)
     first_target: u8,            // the address the built-in policy starts with
     attempts: u8,                // addresses tried so far
-    tag: u16,                    // handler mode: the tag of the Handle route
+    tag: u16,                    // the tag of the Handle route or of the forward target (0: untagged)
+    target_gen: u32,             // the generation of that target (close-by-tag)
     override_target: i32,        // a connection the handler forwarded: its target's index in w._override_targets, else -1
     out_buffers: i32[4],         // handler mode: the output queue, oldest first, at most 4 pool buffers
     out_lengths: i32[4],
@@ -297,7 +298,7 @@ fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool, now: i64) -> _Co
     return _ConnectionSlot {
         gen: gen, live: true, state: if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING }, client_fd: fd, server_fd: -1,
         client_mask: if inspect { c_EPOLLIN } else { 0 }, server_mask: 0, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
-        inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tag: 0, override_target: -1,
+        inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tag: 0, target_gen: 0, override_target: -1,
         out_buffers: [-1; 4], out_lengths: [0; 4], out_count: 0, out_pos: 0, consumed: false, paused: false,
         data_pending: false, want_writable: false, closing: false, closing_reason: CloseReason.PeerClosed,
         up: _Direction { .. }, down: _Direction { .. },
@@ -404,10 +405,12 @@ fn _route_and_connect(w: Worker&, i: i64, hello: Hello) {
     var handle = false;
     var tag: u16 = 0;
     match route.action {
-        Forward f => { count = f.to.addrs.len; },
+        Forward f => { count = f.to.addrs.len; tag = f.to.tag; s.target_gen = f.to.gen; },
         Handle h => { handle = true; tag = h.tag; },
         _ => {},
     }
+    s.tag = tag;
+    if !_tag_allows(w, tag) { _close_connection(w, i, CloseReason.Fenced); return; }   // fenced, or past its deadline
     if handle { _start_handling(w, i, tag, hello); return; }
     if count == 0 { _close_connection(w, i, CloseReason.ByHandler); return; }
     _start_connecting(w, i, count);
@@ -562,6 +565,8 @@ fn _read_direction(w: Worker&, i: i64, up: bool) {
 // the buffer and EPOLLOUT is switched on; reading from the source stays off until it is all written.
 fn _flush_direction(w: Worker&, i: i64, up: bool) {
     let s .= w._connection_slots[i];
+    // Under a tag nothing is written, in either direction, once its deadline has passed (RT-6a): the bytes just read are dropped.
+    if !_tag_allows(w, s.tag) { _close_connection(w, i, CloseReason.Fenced); return; }
     let dir .= _direction_of(s, up);
     let dst = if up { s.server_fd } else { s.client_fd };
     while dir.pos < dir.len {

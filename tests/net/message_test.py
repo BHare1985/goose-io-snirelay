@@ -73,9 +73,13 @@ def rt10b():
             c.close()
         # 10 connections that say nothing and are closed by the 1 s idle timeout
         idle = [connect(ports["idle"]) for _ in range(10)]
-        time.sleep(1.6)
+        for _ in range(4):                                  # keep the 60 held connections busy while the idle ones time out
+            time.sleep(0.4)
+            for c in t7 + t8:
+                c.sendall(b"k"); recv_exact(c, 1)
+        expect_extra = 60 * 4
         d = server.totals()
-        expect_bytes_in = 300 * up + 60 * 5
+        expect_bytes_in = 300 * up + 60 * 5 + expect_extra
         t.check(d["accepted"] == 300 + 60 + 20 + 10, f"RT-10b accepted adds up across 4 workers: 390 (saw {d['accepted']})")
         t.check(d["open"] == 60, f"RT-10b open connections: 60 (saw {d['open']})")
         t.check(d["bytes_in"] == expect_bytes_in and d["bytes_out"] == expect_bytes_in, f"RT-10b bytes in and out: {expect_bytes_in} each (saw {d['bytes_in']} and {d['bytes_out']})")

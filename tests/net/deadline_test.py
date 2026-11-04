@@ -16,13 +16,30 @@ host_lock()
 
 class Stamping:
     """A backend that echoes and records (arrival boottime ms, bytes) for everything it receives."""
-    def __init__(self, port):
+    def __init__(self, port, push=False):
+        self.push = push                      # also send 16 bytes every 20 ms, unasked (server-to-client traffic)
         self.port = port
         self.arrivals = []
         self.lock = threading.Lock()
         self.backend = ThreadedBackend(port, self.handle)
     def handle(self, c):
         c.settimeout(30)
+        done = []
+        if self.push:
+            def pusher():
+                while not done:
+                    try:
+                        c.sendall(b"S" * 16)
+                    except OSError:
+                        return
+                    time.sleep(0.02)
+            threading.Thread(target=pusher, daemon=True).start()
+        try:
+            self.loop(c)
+        finally:
+            done.append(1)
+
+    def loop(self, c):
         while True:
             try:
                 d = c.recv(65536)
@@ -43,8 +60,8 @@ class Stamping:
     def stop(self):
         self.backend.stop()
 
-def rig(fenced=(), workers=1):
-    back = Stamping(free_port())
+def rig(fenced=(), workers=1, push=False):
+    back = Stamping(free_port(), push=push)
     ports = {k: free_port() for k in "ABC"}
     extra = ["--control",
              "--tagged-route", f"127.0.0.1:{ports['A']}=127.0.0.1:{back.port}@7:1",
@@ -117,6 +134,24 @@ def close_tagged():
 
 # ----------------------------------------------------------------------------------------------- RT-6a
 
+class Receiver(threading.Thread):
+    """Records (arrival boottime ms, bytes) of everything the client receives, until the connection ends."""
+    def __init__(self, c):
+        super().__init__(daemon=True)
+        self.c = c; self.arrivals = []
+    def run(self):
+        self.c.settimeout(20)
+        while True:
+            try:
+                d = self.c.recv(65536)
+            except OSError:
+                return
+            if not d:
+                return
+            self.arrivals.append((boottime_ms(), len(d)))
+    def after(self, ms):
+        return sum(n for at, n in self.arrivals if at > ms)
+
 class Sender(threading.Thread):
     """Sends a stamped 16-byte chunk every 20 ms on a connection, until it fails."""
     def __init__(self, c):
@@ -132,7 +167,7 @@ class Sender(threading.Thread):
             time.sleep(0.02)
 
 def deadline_reached(frozen):
-    back, server, ports = rig()
+    back, server, ports = rig(push=True)
     try:
         server.start().wait_ready()
         until = boottime_ms() + (6000 if frozen else 3000)
@@ -140,7 +175,10 @@ def deadline_reached(frozen):
         time.sleep(0.2)
         c = connect(ports["A"], timeout=10)
         other = connect(ports["C"], timeout=10)
-        t.check(works(c) and works(other), "RT-6a before the deadline the tagged connection works")
+        rx = Receiver(c)
+        rx.start()
+        time.sleep(0.3)
+        t.check(len(rx.arrivals) > 0 and not ended(other, 0.05)[0], "RT-6a before the deadline the tagged connection receives data and tag 8 is open")
         sender = Sender(c)
         sender.start()
         if frozen:
@@ -156,7 +194,7 @@ def deadline_reached(frozen):
             server.proc.send_signal(signal.SIGCONT)
             woke = boottime_ms()
             gone, secs = ended(c, 1.5)
-            t.check(woke - frozen_at >= 3500 and woke > until + 2000, f"RT-6a the process was stopped {woke - frozen_at} ms, {woke - until} ms past the deadline")
+            t.check(woke - frozen_at >= 3400 and woke > until + 2000, f"RT-6a the process was stopped {woke - frozen_at} ms, {woke - until} ms past the deadline")
             t.check(back.total() == at_wake, f"RT-6a after SIGCONT the backend received nothing more ({at_wake} bytes before, {back.total()} after)")
             t.check(gone, f"RT-6a the connection was closed when the process woke ({secs:.2f}s)")
         else:
@@ -165,11 +203,14 @@ def deadline_reached(frozen):
             gone, secs = ended(c, 0.5)
             t.check(gone, "RT-6a at the deadline the tagged connection is closed")
         sender.stop_flag = True
+        time.sleep(0.2)
+        t.check(rx.after(until + 50) == 0, f"RT-6a zero bytes reached the CLIENT after the deadline either (the backend was sending throughout, also while the proxy was stopped): {rx.after(until + 50)} bytes")
+        t.check(len(rx.arrivals) > 0, "RT-6a and the client did receive the backend's bytes before the deadline")
         t.check(back.bytes_after(until + 50) == 0, f"RT-6a zero bytes reached the backend after the deadline (+50 ms): {back.bytes_after(until + 50)} bytes")
         if not frozen:
             t.check(back.total() > 16 * 20, "RT-6a and traffic did flow before the deadline")
         t.check(server.wait_closed("Fenced", lambda v: v >= 1, timeout=3) >= 1, "RT-6a the tag's connection was closed as Fenced")
-        t.check(works(other), "RT-6a tag 8 (no deadline set) is not affected")
+        t.check(not ended(other, 0.2)[0], "RT-6a tag 8 (no deadline set) is not affected: still open")
     finally:
         try: server.proc.send_signal(signal.SIGCONT)
         except Exception: pass

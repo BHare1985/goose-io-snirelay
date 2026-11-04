@@ -57,7 +57,17 @@ struct Stats {
 
 // A snapshot of this worker's counters. Call it on the worker's thread, e.g. from a Tick.
 fn stats(w: Worker&) -> Stats {
-    return w._stats;
+    var s = w._stats;
+    s.tags.clear();
+    for i in w._connection_slots.len {                       // sessions per tag: counted when asked, not kept up to date
+        let slot .= w._connection_slots[i];
+        if slot.live && slot.tag != 0 {
+            var found = false;
+            for &t in s.tags { if t.tag == slot.tag { t.open++; found = true; } }
+            if !found && s.tags.len < s.tags.cap { s.tags.push(TagSessions { tag: slot.tag, open: 1 }); }
+        }
+    }
+    return s;
 }
 
 // --- the worker ---------------------------------------------------------------------------------
@@ -88,6 +98,8 @@ root struct Worker {
     _message_fd: i32 = -1,                       // this worker's end of its message pipe (messages.goose)
     _draining: bool = false,
     _drain_deadline_ms: i64 = 0,
+    _tags: _TagEntry[..16] = [],                 // deadlines per tag (messages.goose)
+    _deadline_scan_at: i64 = 0,                  // the earliest deadline not yet enforced, or 0
     _now_ms: i64 = 0,                            // CLOCK_BOOTTIME at the start of the current pass of the loop
     _listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
 }
@@ -108,6 +120,7 @@ fn start(w: Worker&, cfg: Config, index: i64) -> bool {
         w._message_fd = _message_read_fds[index];
         c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, w._message_fd, c_EPOLLIN, _pack_event_data(_EVENT_KIND_MESSAGE, 0, 0));
     }
+    for f in cfg.fenced_tags { w._tags.push(_TagEntry { tag: f, until_ms: 0 }); }
     for li in cfg.listeners.len {
         var p = _ParsedAddress { false, [0; 16], 0 };
         let text = cfg.listeners[li].addr.text;
@@ -133,11 +146,12 @@ fn serve<F>(w: Worker&) {
     loop {
         let n = c_epoll_wait(w._epoll_fd, events[0], 256, 100);
         w._now_ms = c_boottime_ms();
+        // Messages first, then deadlines, then events: a drain or a fence must not be outrun by traffic in the same pass.
+        if n > 0 { for k in n { if (events[k].data & 0xff) == _EVENT_KIND_MESSAGE { _read_messages(w); } } }
+        _enforce_deadlines(w);
         if n < 0 {
             _pause_milliseconds(1);                     // an unexpected epoll error: do not spin
         } else {
-            // Messages first: a drain or a fence must not be outrun by a burst of traffic in the same pass.
-            for k in n { if (events[k].data & 0xff) == _EVENT_KIND_MESSAGE { _read_messages(w); } }
             for k in n { if (events[k].data & 0xff) != _EVENT_KIND_MESSAGE { _dispatch_event(w, events[k].data, events[k].events); } }
         }
         _deliver_events(w, F);
