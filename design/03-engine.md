@@ -73,6 +73,10 @@ struct Side { fd: i32, buf: i32 = -1, len: u32, pos: u32, eof: bool, shut_wr: bo
 - **Stable memory:** the pool is allocated before any I/O and never grows or moves while the
   kernel may write into it. Whether a Goose growable array can be grown in place without moving
   is open (doc 09, O-3); the design does not depend on it.
+- **Slow destinations can pin the pool.** A buffer is held only while its destination is not taking bytes, so
+  enough stalled connections pin every buffer and healthy connections on the same worker wait for one (measured
+  in M2: 100 stalled transfers pinned all 4 buffers of a 4-buffer pool and 20 healthy echo clients waited, then
+  finished intact; RT-5d). RT-5f (fairness) is where this is looked at.
 - **Fairness:** at most 64 KB moved per side per wakeup; then the loop moves on (RT-5f).
 - **Handler-mode output:** `send` copies into the connection's output queue (a chain of pool
   buffers, capped at 4 per connection); `Writable` fires when it drains below one buffer.
@@ -124,3 +128,29 @@ buffer waits, sessions per tag) kept in plain fields, sent on request (§7). Nev
 
 epoll only (user, 2026-11-04): the C proxy's io_uring engines gave little over epoll in Steve's
 benchmarks, so tcprouter does not carry a second engine.
+
+## 11. As built in M2 (facts the tests measured; Brian, 2026-11-04)
+
+- **Level-triggered epoll.** Interest is derived from state, never remembered: a source is read only when its
+  direction has no unwritten bytes, is not at EOF and is not waiting for a buffer; a destination is watched for
+  writability only while bytes are pending. `c_update_interest` recomputes both masks after every change.
+- **The pool grows lazily**, one buffer at a time up to `buffers_per_worker`, by appending to a growable array.
+  An idle worker touches no buffer memory (RSS 4.7 MB at start). Growth never moves existing memory, so a buffer the
+  kernel is writing into stays put (design/09 O-3, verified).
+- **One buffer per direction, only while bytes are unwritten.** An idle connection holds none (RT-5a). Under pressure
+  a read that finds the pool empty is queued (FIFO, with a generation so a closed connection's entry is skipped) and
+  woken when a buffer returns.
+- **The client is not read until the server connect completes** (registered with no interest), so a failed connect can
+  still be retried with the client's bytes untouched (RT-4c, M3).
+- **EOF becomes `shutdown(SHUT_WR)` on the other side**, the direction stops being read, and the connection closes when
+  both directions have ended and told their destinations (half-close both ways, RT-4b).
+- **Event data is `kind | gen << 8 | slot << 32`** and is validated before use: an out-of-range slot adds to
+  `bad_events`, a generation that no longer matches adds to `stale_events`; neither touches a connection.
+- **`spawn()` blocks SIGTERM/SIGINT before starting workers** (they inherit the mask; `wait_for_signal_then_drain` reads
+  a signalfd) and **probes every listener with a plain socket**, so a port held by another process is an error and not a
+  silently shared port (RT-1d's mechanism; its test is in M3). Worker 0 does not probe, as sketched in §1: workers start
+  concurrently, so a worker probing after another had bound with SO_REUSEPORT would fail for no reason.
+- **The C layer (`src/c_sys.c`) returns `-errno`** and builds `sockaddr` itself, so no struct layout is shared with Goose
+  except the 12-byte epoll event, which `_Static_assert` and a unit test pin.
+- **Measured:** 58 bytes of RSS per idle connection (RT-5b limit 512); 1,000 idle connections +64 kB; a backend that never
+  reads stops a 1 GB offer at about 6.7 MB with no RSS growth (RT-5c).

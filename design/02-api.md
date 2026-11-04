@@ -201,7 +201,9 @@ tcprouter::serve(w, p) { w, ev => };               // the engine calls p's funct
 ```goose
 fn stats(w: Worker&) -> Stats     // a flat snapshot; call it on the worker's thread, e.g. from Tick
 // Stats { accepted, open, closed[10] (by CloseReason), bytes_in (client to server), bytes_out,
-//         connect_failures, retries, buffers_total, buffers_in_use, buffer_waits }
+//         connect_failures, retries, buffers_total, buffers_in_use, buffer_waits,
+//         stale_events (event for a connection already closed and its slot reused, RT-2b),
+//         bad_events (event whose slot index was out of range, RT-2c) }
 ```
 
 Counters are per worker and never shared. The M2 tests read them from a `Tick` block (they need to see

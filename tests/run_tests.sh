@@ -4,6 +4,9 @@
 #   tests/run_tests.sh              all unit tests (and net tests when they exist)
 #   tests/run_tests.sh sni          only tests whose file name contains "sni"
 #
+# REPEAT=20 tests/run_tests.sh forward   runs each matching NETWORK driver 20 times and keeps every FAIL line
+# (for tests that failed once and were not understood: a flake is a bug until it is explained).
+#
 # GOOSE selects the compiler (default: goose-kb/bin/goose when present, else goose on PATH).
 # Exit status is non-zero if any test fails to build or fails.
 set -u -o pipefail
@@ -45,11 +48,18 @@ if [ -e "${net_drivers[0]}" ]; then
             case "$drv" in *"$filter"*) ;; *) continue ;; esac
             rows="$(sed -n 's|^# Proves: *\([^(]*\).*|\1|p' "$drv" | head -1)"
             ran=$((ran + 1))
-            if timeout 600 python3 "$drv" >"$work/$name.out" 2>&1; then
-                echo "PASS  $name   rows: ${rows:-none}   $(tail -1 "$work/$name.out")"
+            bad=0
+            for round in $(seq 1 "${REPEAT:-1}"); do
+                if ! timeout 600 python3 "$drv" >"$work/$name.out" 2>&1; then
+                    bad=$((bad + 1))
+                    echo "FAIL  $name (run $round)   rows: ${rows:-none}   $(tail -1 "$work/$name.out")"
+                    grep -E '^(FAIL|SKIP)' "$work/$name.out" | head -8 | sed 's/^/    /'
+                    cp "$work/$name.out" "/tmp/tcprouter-$name-fail-$round.out"
+                fi
+            done
+            if [ "$bad" -eq 0 ]; then
+                echo "PASS  $name   rows: ${rows:-none}   $(tail -1 "$work/$name.out")${REPEAT:+   ($REPEAT runs)}"
             else
-                echo "FAIL  $name   rows: ${rows:-none}   $(tail -1 "$work/$name.out")"
-                grep -E '^(FAIL|SKIP)' "$work/$name.out" | head -8 | sed 's/^/    /'
                 failed=$((failed + 1))
             fi
         done
