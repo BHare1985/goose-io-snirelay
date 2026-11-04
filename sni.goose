@@ -16,13 +16,9 @@ enum Hello {
 let MAX_HELLO: i64 = 16384;
 
 // Parses what has arrived so far, from byte 0 of the connection. Never consumes or changes it.
-// A ClientHello split over several TLS records needs the form with `scratch`.
-fn parse_hello(bytes: const u8[:]) -> Hello {
-    return Hello.Invalid;
-}
-
-// As above; a ClientHello split over several records is reassembled into `scratch`
-// (caller-owned; MAX_HELLO bytes always suffice).
+// A ClientHello split over several TLS records is reassembled into `scratch` (caller-owned;
+// MAX_HELLO bytes always suffice); one record is parsed in place. There is one form, because a
+// split hello always needs scratch and a form without it would be a trap (design/04-sni.md).
 fn parse_hello(bytes: const u8[:], scratch: u8[:]) -> Hello {
     return Hello.Invalid;
 }
