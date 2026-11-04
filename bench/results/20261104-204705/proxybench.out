@@ -1,0 +1,73 @@
+waiting for host lock...
+>> building
+>> layout: proxy cpus=[0] backend cpus=[2, 3] (2 thr) wrk cpus=[4, 5, 6, 7] (4 thr)
+>> workers: 1 -> proxy.c 1, nginx 1, haproxy 1; backend=builtin (2)
+>> configs: direct epoll_copy epoll_hybrid goose
+>> L2/core=512 KiB;  perf: no
+   note: goose: 1 x '/home/bhare/dev/tcprouter/bench/forward_server --listen 127.0.0.1:18447 --to 127.0.0.1:18080 --workers 1 --stat-ms 3600000' on port 18447
+   note: 6 CPU vulnerability mitigations active (spectre_v2, vmscape, spec_store_bypass, spectre_v1, retbleed, spec_rstack_overflow): syscalls and kernel entry cost more; 'mitigations=off' on the kernel command line (reboot, less secure) helps every proxy, most those making the most syscalls
+>> 60 runs, ETA ~11 min. Leave the machine idle.
+>> correctness check (data integrity, ordering, half-close, slow readers; web mix through every config)
+   direct           PASS  (mix)
+   epoll_copy       PASS  (mix + verify)
+   epoll_hybrid     PASS  (mix + verify)
+   goose            PASS  (mix + verify)
+         11B c=64      r1 direct              181284 req/s  p99=   0.69ms  wrk= 60%  3680MHz 52C
+         11B c=64      r1 epoll_copy           57253 req/s  p99=   3.08ms  wrk= 48%  3683MHz 51C
+         11B c=64      r1 epoll_hybrid         56772 req/s  p99=   3.67ms  wrk= 47%  3682MHz 51C
+         11B c=64      r1 goose                56569 req/s  p99=   1.58ms  wrk= 48%  3676MHz 52C
+         11B c=64      r2 epoll_copy           57133 req/s  p99=   1.92ms  wrk= 48%  3677MHz 52C
+         11B c=64      r2 epoll_hybrid         57092 req/s  p99=   1.96ms  wrk= 48%  3691MHz 52C
+         11B c=64      r2 goose                56450 req/s  p99=   1.87ms  wrk= 48%  3679MHz 53C
+         11B c=64      r2 direct              182043 req/s  p99=   0.71ms  wrk= 61%  3692MHz 56C
+         11B c=64      r3 epoll_hybrid         57381 req/s  p99=   1.77ms  wrk= 48%  3692MHz 54C
+         11B c=64      r3 goose                56384 req/s  p99=   1.69ms  wrk= 47%  3680MHz 54C
+         11B c=64      r3 direct              180071 req/s  p99=   0.78ms  wrk= 61%  3674MHz 57C
+         11B c=64      r3 epoll_copy           56950 req/s  p99=   4.66ms  wrk= 48%  3686MHz 55C
+         11B c=64  new r1 direct               46354 req/s  p99=   1.29ms  wrk= 99%  3679MHz 62C
+         11B c=64  new r1 epoll_copy           10497 req/s  p99=   9.15ms  wrk= 25%  3657MHz 60C
+         11B c=64  new r1 epoll_hybrid         10532 req/s  p99=   8.55ms  wrk= 24%  3665MHz 54C
+         11B c=64  new r1 goose                 8612 req/s  p99=  10.00ms  wrk= 18%  3693MHz 53C
+         11B c=64  new r2 epoll_copy           10600 req/s  p99=   7.26ms  wrk= 24%  3673MHz 53C
+         11B c=64  new r2 epoll_hybrid         10608 req/s  p99=  10.73ms  wrk= 24%  3685MHz 54C
+         11B c=64  new r2 goose                 8567 req/s  p99=   9.85ms  wrk= 18%  3680MHz 53C
+         11B c=64  new r2 direct               46618 req/s  p99=   1.22ms  wrk= 99%  3692MHz 62C
+         11B c=64  new r3 epoll_hybrid         10609 req/s  p99=   7.98ms  wrk= 24%  3684MHz 60C
+         11B c=64  new r3 goose                 8615 req/s  p99=  10.93ms  wrk= 18%  3690MHz 54C
+         11B c=64  new r3 direct               46712 req/s  p99=   1.22ms  wrk= 99%  3692MHz 62C
+         11B c=64  new r3 epoll_copy           10567 req/s  p99=  11.22ms  wrk= 26%  3687MHz 60C
+      65536B c=64      r1 direct               59066 req/s  p99=   2.25ms  wrk= 55%  3679MHz 58C
+      65536B c=64      r1 epoll_copy           16252 req/s  p99=   6.94ms  wrk= 36%  3692MHz 55C
+      65536B c=64      r1 epoll_hybrid         27570 req/s  p99=   3.74ms  wrk= 55%  3674MHz 58C
+      65536B c=64      r1 goose                16483 req/s  p99=   5.88ms  wrk= 41%  3689MHz 56C
+      65536B c=64      r2 epoll_copy           16291 req/s  p99=   6.81ms  wrk= 36%  3682MHz 55C
+      65536B c=64      r2 epoll_hybrid         27811 req/s  p99=   3.55ms  wrk= 55%  3667MHz 58C
+      65536B c=64      r2 goose                16438 req/s  p99=   6.82ms  wrk= 40%  3693MHz 56C
+      65536B c=64      r2 direct               58101 req/s  p99=   2.53ms  wrk= 55%  3692MHz 58C
+      65536B c=64      r3 epoll_hybrid         27314 req/s  p99=   7.83ms  wrk= 54%  3675MHz 59C
+      65536B c=64      r3 goose                16674 req/s  p99=   5.03ms  wrk= 41%  3693MHz 56C
+      65536B c=64      r3 direct               59135 req/s  p99=   2.44ms  wrk= 55%  3692MHz 59C
+      65536B c=64      r3 epoll_copy           16171 req/s  p99=   6.96ms  wrk= 35%  3692MHz 56C
+    1048576B c=16      r1 direct                4925 req/s  p99=   6.63ms  wrk= 54%  3691MHz 58C
+    1048576B c=16      r1 epoll_copy            1382 req/s  p99=  16.19ms  wrk= 29%  3689MHz 56C
+    1048576B c=16      r1 epoll_hybrid          4931 req/s  p99=  13.16ms  wrk= 54%  3672MHz 63C
+    1048576B c=16      r1 goose                 1359 req/s  p99=  14.00ms  wrk= 31%  3681MHz 60C
+    1048576B c=16      r2 epoll_copy            1448 req/s  p99=  14.17ms  wrk= 30%  3687MHz 56C
+    1048576B c=16      r2 epoll_hybrid          4986 req/s  p99=   8.65ms  wrk= 56%  3676MHz 64C
+    1048576B c=16      r2 goose                 1396 req/s  p99=  16.66ms  wrk= 32%  3684MHz 61C
+    1048576B c=16      r2 direct                4932 req/s  p99=   7.44ms  wrk= 53%  3679MHz 59C
+    1048576B c=16      r3 epoll_hybrid          5055 req/s  p99=   6.34ms  wrk= 55%  3691MHz 65C
+    1048576B c=16      r3 goose                 1463 req/s  p99=  20.88ms  wrk= 33%  3681MHz 62C
+    1048576B c=16      r3 direct                4907 req/s  p99=   6.65ms  wrk= 55%  3692MHz 59C
+    1048576B c=16      r3 epoll_copy            1507 req/s  p99=  14.54ms  wrk= 31%  3684MHz 57C
+     web-mix c=64      r1 direct              100594 req/s  p99=   1.38ms  wrk= 63%  3692MHz 63C
+     web-mix c=64      r1 epoll_copy           30785 req/s  p99=   7.05ms  wrk= 49%  3685MHz 61C
+     web-mix c=64      r1 epoll_hybrid         39724 req/s  p99=   5.50ms  wrk= 54%  3672MHz 58C
+     web-mix c=64      r1 goose                30476 req/s  p99=   5.35ms  wrk= 49%  3690MHz 57C
+     web-mix c=64      r2 epoll_copy           30771 req/s  p99=   5.86ms  wrk= 50%  3691MHz 57C
+     web-mix c=64      r2 epoll_hybrid         39800 req/s  p99=   4.35ms  wrk= 53%  3664MHz 58C
+     web-mix c=64      r2 goose                30095 req/s  p99=   5.10ms  wrk= 48%  3691MHz 56C
+     web-mix c=64      r2 direct              100747 req/s  p99=   1.31ms  wrk= 63%  3678MHz 62C
+     web-mix c=64      r3 epoll_hybrid         40501 req/s  p99=   4.67ms  wrk= 54%  3680MHz 59C
+     web-mix c=64      r3 goose                30015 req/s  p99=   5.50ms  wrk= 48%  3673MHz 57C
+     web-mix c=64      r3 direct              100943 req/s  p99=   1.38ms  wrk= 64%  3692MHz 62C

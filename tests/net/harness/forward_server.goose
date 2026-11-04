@@ -4,7 +4,7 @@
 //
 //     forward_server --listen 127.0.0.1:9000 [--listen [::1]:9000] --to 127.0.0.1:9100 [--to …]
 //                    [--route LISTEN=TARGET[,TARGET…] …]
-//                    [--workers 1] [--buffers 4096] [--buffer-size 16384] [--stat-ms 1000]
+//                    [--workers 1] [--buffers 4096] [--buffer-size 32768] [--stat-ms 1000]
 //                    [--inspect-listen ADDR] [--sni NAME=T[,T]] [--sni-suffix NAME=T[,T]] [--sni-none T[,T]] [--sni-any T[,T]]
 //                    [--tagged-route LISTEN=T[,T]@TAG:GEN] [--fenced TAG]
 //                    [--control] [--drain-ms N]
@@ -44,7 +44,7 @@ root struct Options {
     half_close_timeout_ms: i64 = 0,
     workers: i64 = 1,
     buffers: i64 = 4096,
-    buffer_size: i64 = 16384,
+    buffer_size: i64 = 32768,
     stat_ms: i64 = 1000,
 }
 

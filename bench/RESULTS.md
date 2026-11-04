@@ -52,3 +52,16 @@ Goose = tcprouter's forward_server, optimised build, copy-only (no splice). Like
   round trips per direction against fewer with a larger buffer; one `recv` per epoll event and level-triggered re-arming per chunk; `epoll_ctl(MOD)` after every state change
   (`_update_epoll_interest`); the per-request cost of connection setup (slot, route match, parse address, connect) for the new-connection row.
   The first thing I would measure, with Steve's `PROFILE=` or `strace -c`, is syscalls and epoll_ctl calls per request.
+
+## Performance pass 1 (buffer size, drain loop, setup syscalls)
+
+Method: `bench/syscalls.py` (strace -c -f, 4 s of wrk) for counts; `bench/run_m6.sh QUICK` for throughput (3 rounds, same host, same method as above).
+
+| change | what the counts showed |
+|---|---|
+| `Limits.buffer_size` 16 KiB -> 32 KiB (the C proxy's `bufsz`) | 16 KiB response: 6.2 -> 4.2 syscalls/request (C: 4.2). 1 MiB: 142 -> 87 (C: 69.5) |
+| read -> write loop until a short read, at most 64 KB per wakeup (`_WAKEUP_BUDGET`) | 1 MiB: epoll_wait 4.4 -> 1.4 per request (C: 0.2); total 87 -> 83 |
+| TCP_NODELAY set once on the listener (accepted sockets inherit it); no `shutdown` when both directions have ended and the close follows | new connection: 21.5 -> 19.5 syscalls (C: 15.4) |
+
+Throughput after (req/s, goose vs epoll_copy, median of 3): 16 KiB 42.4k vs 42.5k (99.6%); 64 KiB 16.5k vs 16.2k; 1 MiB 1,356 vs 1,409 (96%); web mix 30.1k vs 30.8k (98%); 11 B keep-alive 56.4k vs 57.1k (99%); 11 B new connection per request 8,720 vs 10,480 (83%).
+New connection per request: both proxies spend ~4.8 of 5 CPU seconds in the kernel (user time 0.15 s vs 0.12 s), so the gap is syscall count: 19.5 vs 15.4 per request. The four extra are the cost of semantics the C copy engine does not have: half-close (one more `recv` to see the second EOF, one `epoll_ctl(MOD)` to stop reading the source that ended) and not reading the client while connecting (`ADD` with no interest, then two `MOD`s once connected).

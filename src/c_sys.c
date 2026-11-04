@@ -90,6 +90,7 @@ int32_t c_listen(uint8_t v6, const uint8_t *ip, uint16_t port, uint8_t reuseport
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) < 0) err = errno;
     else if (reuseport && setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one) < 0) err = errno;
     else if (v6 && setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof one) < 0) err = errno;
+    else if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one) < 0) err = errno;   /* accepted sockets inherit it */
     else if (bind(fd, (struct sockaddr *)&ss, len) < 0) err = errno;
     else if (listen(fd, backlog) < 0) err = errno;
     if (err) { close(fd); return -err; }
@@ -100,9 +101,7 @@ int32_t c_listen(uint8_t v6, const uint8_t *ip, uint16_t port, uint8_t reuseport
 int32_t c_accept(int32_t lfd) {
     int fd = accept4(lfd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
     if (fd < 0) return -errno;
-    int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
-    return fd;
+    return fd;                                   /* TCP_NODELAY is inherited from the listening socket (c_listen) */
 }
 
 /* Starts a non-blocking connect: the socket's fd with the connect in progress (or already done), or -errno.

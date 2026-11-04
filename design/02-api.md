@@ -55,7 +55,7 @@ struct Route { listener: u16, on: Match, action: Action }     // `match` is a Go
 struct Limits {
     connect_timeout_ms: i64 = 2000,   idle_timeout_ms: i64 = 300000,
     half_close_timeout_ms: i64 = 30000,   inspect_timeout_ms: i64 = 5000,
-    max_conns_per_worker: i64 = 65536,    buffer_size: i64 = 16384,    buffers_per_worker: i64 = 4096,
+    max_conns_per_worker: i64 = 65536,    buffer_size: i64 = 32768,    buffers_per_worker: i64 = 4096,
 }
 struct Config { listeners: Listener[..16], routes: Route[..256], limits: Limits = Limits { .. } }
 

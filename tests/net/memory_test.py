@@ -25,7 +25,7 @@ def open_idle(port, n):
 
 def rt5a():
     raise_nofile(8192)
-    buffer_size = 16384
+    buffer_size = 32768
     bport, pport = free_port(), free_port()
     backend = EchoBackend(bport, backlog=4096)
     server = Server([f"127.0.0.1:{pport}"], [f"127.0.0.1:{bport}"], workers=1, nofile=8192, stat_ms=200)
@@ -39,7 +39,7 @@ def rt5a():
         t.check(server.total("open") == 1000, f"RT-5a 1,000 idle connections are open in the worker (saw {server.total('open')})")
         t.check(server.total("buffers_in_use") == 0, f"RT-5a idle connections hold no buffer (buffers_in_use={server.total('buffers_in_use')})")
         # The stat has to be honest (Charlie): if the worker really held a buffer per idle connection, RSS would
-        # grow by 1,000 x buffer_size = 16 MB; the ceiling is a quarter of that.
+        # grow by 1,000 x buffer_size = 32 MB; the ceiling is a quarter of that.
         grown = (server.rss_kb() - rss_before) * 1024
         ceiling = 1000 * buffer_size // 4
         t.note(f"RT-5a measured: RSS grew {grown / 1024:.0f} kB over 1,000 idle connections (ceiling {ceiling // 1024} kB)")

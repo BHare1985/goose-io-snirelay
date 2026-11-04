@@ -23,6 +23,7 @@ import os;
 let _STATE_HANDLING: u8 = 4;         // Action.Handle: the user's code owns the connection through events
 let _STATE_INSPECTING: u8 = 3;       // an inspect: Sni listener: waiting for the ClientHello, which stays queued in the kernel
 let _STATE_CONNECTING: u8 = 1;       // the connect to the server is in progress; the client is not read yet
+let _WAKEUP_BUDGET: i64 = 65536;      // bytes one connection direction may move per epoll wakeup before others get a turn (RT-5f)
 let _STATE_FORWARDING: u8 = 2;
 
 let _EVENT_KIND_LISTENER: u64 = 1;
@@ -513,12 +514,14 @@ fn _connect_finished(w: Worker&, i: i64) {
 // --- moving bytes -------------------------------------------------------------------------------------------------
 
 // One read from the source of a direction (`up`: the client), then as much of it written as the destination takes.
-fn _read_direction(w: Worker&, i: i64, up: bool) {
+// Reads one buffer's worth and starts writing it. Returns the bytes read when the whole buffer was written at once
+// and the connection is still ready for more, else 0 (stopped, blocked, ended or closed).
+fn _read_once(w: Worker&, i: i64, up: bool) -> i64 {
     let s .= w._connection_slots[i];
     let dir .= _direction_of(s, up);
     let src = if up { s.client_fd } else { s.server_fd };
     let dst = if up { s.server_fd } else { s.client_fd };
-    if !_direction_can_read(dir) { return; }                      // a stale readiness: nothing to do
+    if !_direction_can_read(dir) { return 0; }                      // a stale readiness: nothing to do
 
     if dir.buf < 0 {
         let b = _take_buffer(w);
@@ -527,7 +530,7 @@ fn _read_direction(w: Worker&, i: i64, up: bool) {
             w._waiting_reads.push(_pack_event_data(if up { 1 } else { 0 }, i, s.gen));
             w._stats.buffer_waits++;
             _update_epoll_interest(w, i);
-            return;
+            return 0;
         }
         dir.buf = b;
     }
@@ -538,7 +541,8 @@ fn _read_direction(w: Worker&, i: i64, up: bool) {
         dir.pos = 0;
         s.last_active_ms = w._now_ms;
         _flush_direction(w, i, up);
-        return;
+        if !s.live || dir.buf >= 0 { return 0; }              // closed, or the write blocked: epoll tells us when to go on
+        return if n == buf.len { n } else { 0 };              // a short read means the socket is drained
     }
     // Nothing to keep: give the buffer back before anything else.
     let held = dir.buf;
@@ -549,20 +553,40 @@ fn _read_direction(w: Worker&, i: i64, up: bool) {
     if n == 0 {                                           // the source ended: tell the destination, stop reading
         dir.eof = true;
         if s.half_closed_at_ms == 0 { s.half_closed_at_ms = w._now_ms; }
-        c_shutdown_wr(dst);
+        _shutdown_unless_closing(s, up, dst);
         dir.shut = true;
         _finish_or_update_interest(w, i);
-        return;
+        return 0;
     }
     if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) {
         _update_epoll_interest(w, i);
-        return;
+        return 0;
     }
     _close_connection(w, i, CloseReason.PeerReset);
+    return 0;
+}
+
+// Keeps reading and writing while the source has more, but gives up after _WAKEUP_BUDGET bytes so one busy
+// connection cannot starve the others (RT-5f); epoll is level-triggered, so the rest is reported again.
+fn _read_direction(w: Worker&, i: i64, up: bool) {
+    var moved: i64 = 0;
+    while moved < _WAKEUP_BUDGET {
+        let n = _read_once(w, i, up);
+        if n == 0 { return; }
+        moved += n;
+    }
 }
 
 // Writes the bytes a direction holds to its destination. Whatever the destination does not take stays in
 // the buffer and EPOLLOUT is switched on; reading from the source stays off until it is all written.
+// Tells the destination that this direction ended, unless the other direction has already ended too: then the
+// connection closes right away and the close itself sends the FIN (one syscall less per connection).
+fn _shutdown_unless_closing(s: _ConnectionSlot&, up: bool, dst: i32) {
+    let other .= _direction_of(s, !up);
+    if other.eof && other.shut { return; }
+    c_shutdown_wr(dst);
+}
+
 fn _flush_direction(w: Worker&, i: i64, up: bool) {
     let s .= w._connection_slots[i];
     // Under a tag nothing is written, in either direction, once its deadline has passed (RT-6a): the bytes just read are dropped.
@@ -592,7 +616,7 @@ fn _flush_direction(w: Worker&, i: i64, up: bool) {
     dir.pos = 0;
     _give_back_buffer(w, held);
     if dir.eof && !dir.shut {
-        c_shutdown_wr(dst);
+        _shutdown_unless_closing(s, up, dst);
         dir.shut = true;
     }
     _finish_or_update_interest(w, i);

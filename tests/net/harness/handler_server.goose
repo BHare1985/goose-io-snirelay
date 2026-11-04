@@ -196,7 +196,7 @@ root struct Options {
     handles: u8[][>..] = [],
     workers: i64 = 1,
     buffers: i64 = 4096,
-    buffer_size: i64 = 16384,
+    buffer_size: i64 = 32768,
 }
 
 fn main() {

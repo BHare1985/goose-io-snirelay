@@ -64,7 +64,7 @@ struct Limits {
     half_close_timeout_ms: i64 = 30000,
     inspect_timeout_ms: i64 = 5000,    // time allowed for the ClientHello to arrive
     max_conns_per_worker: i64 = 65536,
-    buffer_size: i64 = 16384,
+    buffer_size: i64 = 32768,
     buffers_per_worker: i64 = 4096,
 }
 
