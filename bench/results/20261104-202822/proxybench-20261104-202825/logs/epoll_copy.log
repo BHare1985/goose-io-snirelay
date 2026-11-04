@@ -1,0 +1,175 @@
+### RUN 
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+final [w0] active=0 accepted=3413 to_splice=0 to_copy=0 spills=233 enobufs=0 splices=105 kills=1339 stale=1 pipes_pooled=12 fin_merged=5 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 11:64:0:0
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=62 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=118 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 11:64:0:1
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=47 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=109 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 11:64:0:2
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=62 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=122 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 11:512:0:0
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=512 accepted=1027 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=510 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=1027 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=1019 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 11:512:0:1
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=512 accepted=1027 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=473 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=1027 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=977 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 11:512:0:2
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=512 accepted=1027 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=511 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=1027 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=1019 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 11:64:1:0
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=51208 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=56 stale=0 pipes_pooled=0 fin_merged=51051 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=94449 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=116 stale=0 pipes_pooled=0 fin_merged=94191 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 11:64:1:1
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=52823 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=47 stale=0 pipes_pooled=0 fin_merged=52689 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=96234 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=96 stale=0 pipes_pooled=0 fin_merged=95993 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 11:64:1:2
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=52179 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=60 stale=0 pipes_pooled=0 fin_merged=51877 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=94869 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=110 stale=0 pipes_pooled=0 fin_merged=94601 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 16384:64:0:0
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=62 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=122 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 16384:64:0:1
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=64 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=119 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 16384:64:0:2
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=62 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=123 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 65536:64:0:0
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=61 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=121 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 65536:64:0:1
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=62 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=123 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 65536:64:0:2
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=61 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=121 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 1048576:16:0:0
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=16 accepted=35 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=17 stale=9 pipes_pooled=0 fin_merged=2 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=35 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=32 stale=12 pipes_pooled=0 fin_merged=2 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 1048576:16:0:1
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=16 accepted=35 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=15 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=35 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=31 stale=6 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN 1048576:16:0:2
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=16 accepted=35 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=17 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=35 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=33 stale=4 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN mix:64:0:0
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=64 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=125 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN mix:64:0:1
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=62 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=125 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+### RUN mix:64:0:2
+proxy: io=epoll mode=copy workers=1 pin=0 pool=512x32768 pipe=262144 maxconn=65536 switch=1/3
+options: eof-probes=4 bulk=8192
+listen :18443 tcp idle-timeout=0 half-close-timeout=60000
+  route -> 127.0.0.1:18080
+  backends: connect-timeout=1000 backup-connect-timeout=1000 check=none (passive) backup-check=tcp interval=1000 timeout=1000 rise=2 fall=2
+[w0] active=64 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=62 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0
+final [w0] active=0 accepted=131 to_splice=0 to_copy=0 spills=0 enobufs=0 splices=0 kills=120 stale=0 pipes_pooled=0 fin_merged=0 connect_fail=0 retries=0 no_server=0 fenced=0 idle_closed=0 half_closed=0

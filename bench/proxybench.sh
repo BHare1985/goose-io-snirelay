@@ -86,7 +86,7 @@
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
-[ "$(id -u)" -eq 0 ] || { echo "run with sudo (needed for perf counters, CPU pinning info and package installs)"; exit 1; }
+[ "$(id -u)" -eq 0 ] || [ "${NOROOT:-0}" = 1 ] || { echo "run with sudo (needed for perf counters, CPU pinning info and package installs)"; exit 1; }   # NOROOT=1: Brian's local change so the no-root line in HANDOFF section 8 runs; PERF=0 TUNE=0
 [ -f "$SRC/proxy.c" ] && [ -f "$SRC/backend.c" ] || { echo "proxy.c and backend.c must be next to this script"; exit 1; }
 
 if [ "${QUICK:-0}" = 1 ]; then

@@ -1,0 +1,31 @@
+{
+  "uptime": "499219.36 2207510.81\n",
+  "loadavg": "3.00 3.42 2.96 1/657 2120820\n",
+  "c_epoll_copy": {
+    "idle_rss_kb": 2616,
+    "rss_kb_with_1000_idle": 2788,
+    "bytes_per_idle_connection_1000": 176,
+    "rss_kb_with_10000_idle": 4372,
+    "bytes_per_idle_connection_10000": 180,
+    "rss_kb_under_load_peak": 4392,
+    "vmhwm_kb": 4392
+  },
+  "c_epoll_hybrid": {
+    "idle_rss_kb": 2624,
+    "rss_kb_with_1000_idle": 2796,
+    "bytes_per_idle_connection_1000": 176,
+    "rss_kb_with_10000_idle": 4380,
+    "bytes_per_idle_connection_10000": 180,
+    "rss_kb_under_load_peak": 4400,
+    "vmhwm_kb": 4400
+  },
+  "goose": {
+    "idle_rss_kb": 4340,
+    "rss_kb_with_1000_idle": 4504,
+    "bytes_per_idle_connection_1000": 168,
+    "rss_kb_with_10000_idle": 5768,
+    "bytes_per_idle_connection_10000": 146,
+    "rss_kb_under_load_peak": 5804,
+    "vmhwm_kb": 5804
+  }
+}
