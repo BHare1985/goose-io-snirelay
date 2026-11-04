@@ -38,11 +38,11 @@ enum Event {
 root struct Worker {
     error: u8[..200] = [],             // why start() returned false
     index: i64 = 0,
-    slots: Slot[>..] = [],
-    free_slots: u32[>..<] = [],
+    tr_slots: tr_Slot[>..] = [],
+    tr_free: u32[>..<] = [],
 }
 
-struct Slot { gen: u32, live: bool }
+struct tr_Slot { gen: u32, live: bool }
 
 // Binds this worker's listeners (SO_REUSEPORT) and prepares its tables. Returns false and fills
 // w.error (naming the address and errno) instead of aborting when it cannot, e.g. the port is

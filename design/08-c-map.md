@@ -10,7 +10,7 @@ function pointers; liburing behind a thin C surface (`c_proxy/AGENTS.md`).
 | Listener setup, `SO_REUSEPORT`, IPv4/6 | tcprouter | v1 | Add the port-in-use check (RT-1d) |
 | ClientHello/SNI parser, fragmented records | tcprouter (doc 04) | v1 | Behaviour, not code |
 | Routes, default, unknown/no-SNI | tcprouter | v1 | Routes are data |
-| Connection pool, free stack, generations, packed user data | tcprouter | v1 | `slot_pool` [V t04] |
+| Connection pool, free stack, generations, packed user data | tcprouter | v1 | A `tr_Slot[>..]` table + free list inside the `Worker` root (a root cannot hold a `slot_pool`) [V] |
 | Copy forwarding, partial writes, half-close, EOF | tcprouter | v1 | |
 | Backpressure (`spill`/`pump`), per-wakeup budget | tcprouter | v1 | Copy first |
 | Pipe pool, splice, hybrid copy/splice switch | tcprouter | v2 | Splice later; leave the switch heuristics out |

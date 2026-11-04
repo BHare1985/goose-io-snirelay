@@ -146,6 +146,12 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool        // hand the conn to t
 - **Output is buffered by the engine** up to a per-connection cap (`limits.buffer_size × 4`);
   `send` returns false at the cap and you get `Writable` when it drains. A server that ignores
   `false` loses data only on that connection, never memory (RT-5e).
+- **The `return` trap** (also in the README): a `return` inside the block leaves the function that
+  contains the block, here the whole worker. Never put logic inline in the block.
+  ```goose
+  tcprouter::serve(w) { w, ev => if bad { return; } };     // WRONG: ends the worker
+  tcprouter::serve(w) { w, ev => on_event(w, ev); };       // right: a named handler function
+  ```
 - **`Data` is a view** into the engine's buffer. It is gone after your block returns (Goose
   enforces this [D]).
 

@@ -34,7 +34,8 @@ burst of traffic (RT-6b). The C proxy learned this the hard way (463f670).
 ```goose
 struct Conn { slot: u32, gen: u32 }                    // public handle (doc 02)
 
-struct Slot {                                          // one per connection, in a slot_pool [V t04]
+struct tr_Slot {                                       // one per connection, in a table inside the Worker root
+                                                       // (a root cannot contain a slot_pool [V M0]); internal names start with `tr_`
     gen: u32,                  // bumped on free; a handle or event with an old gen is ignored
     state: State,              // Inspecting, Connecting, Forwarding, Handling, Closing
     client: Side,
