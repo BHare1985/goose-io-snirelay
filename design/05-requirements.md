@@ -43,7 +43,7 @@ Columns: id · behaviour · priority · test · status.
 |---|---|---|---|---|
 | RT-4a | Bytes are forwarded both ways exactly (64 clients × 10 MB random, checksums match) | v1 | `forward_test` | done |
 | RT-4b | Half-close: client shuts down writing → backend sees EOF, and the backend's remaining reply still reaches the client; and the reverse | v1 | `forward_test` | done |
-| RT-4c | A refused or timed-out connect is retried on the next target address **before any client byte is consumed**, and the client sees a normal reply | v1 | `retry_test` | refused half green; timed-out half red (awaiting approval) |
+| RT-4c | A refused or timed-out connect is retried on the next target address **before any client byte is consumed**, and the client sees a normal reply | v1 | `retry_test`, `timeout_test` | refused half green; timed-out half red (awaiting approval) |
 | RT-4d | When every target fails, the client connection is closed and `connect_failed` counted | v1 | `retry_test` | green |
 | RT-4e | `forward(c, target)` from handler mode works only before any byte was consumed; afterwards it is refused | v1 | `handler_test` | green |
 | RT-4f | Throughput and p99 latency within 10% of the C proxy's copy engine on the same host (`bench/`) | v2 | `bench/compare.sh` | design |
