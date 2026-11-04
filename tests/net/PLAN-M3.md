@@ -17,9 +17,8 @@ one byte and then `forward` (must be refused), tag 6 `reset` at once, tag 7 the 
 - RT-1b: 4 workers, one port, echo backend, 400 connections from 400 sequential clients: every worker's own STAT line
   shows `accepted >= 50` and the sum is 400. (If the kernel's spread on this host is worse than that, the test prints each
   worker's count and fails; then we look at whether SO_REUSEPORT hashing or our accept batching is at fault.)
-- RT-1d: a second process holding the port with a plain `bind`+`listen` (no SO_REUSEPORT): `forward_server` exits with
-  status 2... no: `start()` fails and the program prints the library's error; the driver checks the message names the address
-  and says "Address already in use". A listener that held it with SO_REUSEPORT is also refused (spawn probes with a plain
+- RT-1d: a second process holding the port with a plain `bind`+`listen` (no SO_REUSEPORT): `start()` fails in every worker and `forward_server`
+  prints the library's error on stderr; the driver checks that the message names the address and says "Address already in use". A listener that held it with SO_REUSEPORT is also refused (spawn probes with a plain
   socket). Afterwards the other process still gets all its connections (we did not steal any).
 
 **chaos_test (new) RT-1e.** The worker must count and continue, never abort or exit:
