@@ -1,4 +1,9 @@
-# Handoff (Brian, 2026-11-04, end of session)
+# Handoff (Brian, 2026-11-04; updated after M4)
+
+**Update after M4:** M4 is done (timeouts, drain, messages, tags and deadlines, stats across workers); 21 test files pass; 42 of 48 v1 rows are
+green or done, the remaining six are M5 (RT-2a, RT-5f, RT-5g, RT-11a-c). `serve(w, policy)` (the tcpproxy hook) is still the one engine stub. The
+backpressure_test flake hunt came back clean: 60 of 60 runs (30 alone, 30 beside a looping forward_test), so RT-5c and RT-5d are done.
+library lines: Goose 2005, C 223. The sections below are the end-of-M3 handoff and are kept for the record.
 
 Everything below is committed. Nothing is half-built: group C (handler mode) finished green before this was written.
 The tip of `main` is this file's commit; the last code commit is `09255ec` ("engine: handler mode").
