@@ -8,9 +8,14 @@
 //
 // A direction owns at most ONE pool buffer, and only while it holds bytes it has read but not yet written.
 // An idle connection therefore holds none (RT-5a). While a direction has unwritten bytes the engine stops
-// reading its source (EPOLLIN off) and waits for the destination to become writable (EPOLLOUT on): that
-// is the whole of backpressure (RT-5c). When the pool is empty a read waits in a queue until a buffer
-// comes back (RT-5d). epoll is level-triggered, so "interest" is simply what the slot's state needs.
+// reading its source and waits for the destination to become writable: that is the whole of backpressure
+// (RT-5c). When the pool is empty a read waits in a queue until a buffer comes back (RT-5d).
+//
+// Forwarded sockets are registered with epoll ONCE, edge-triggered (EPOLLIN|OUT|RDHUP|ET), and never modified
+// again: an event only sets a readiness flag in the slot (`ready`), and _pump moves bytes until a flag runs out
+// (recv or send says EAGAIN, or a short read drained the socket). A pump that stops because of its byte budget
+// puts the connection on the worker's ready list, because an edge will not be reported again. Listeners, inspecting
+// connections and handler connections stay level-triggered (their interest changes with their state).
 namespace tcprouter;
 
 import .config;
@@ -25,6 +30,16 @@ let _STATE_INSPECTING: u8 = 3;       // an inspect: Sni listener: waiting for th
 let _STATE_CONNECTING: u8 = 1;       // the connect to the server is in progress; the client is not read yet
 let _WAKEUP_BUDGET: i64 = 65536;      // bytes one connection direction may move per epoll wakeup before others get a turn (RT-5f)
 let _STATE_FORWARDING: u8 = 2;
+
+// Readiness flags of a forwarded connection: for each socket, readable, writable, and "the peer ended its sending"
+// (so a short read does not mean the end of the data: the next read tells).
+let _READY_CLIENT_IN: u8 = 1;
+let _READY_CLIENT_OUT: u8 = 2;
+let _READY_SERVER_IN: u8 = 4;
+let _READY_SERVER_OUT: u8 = 8;
+let _READY_CLIENT_ENDED: u8 = 16;
+let _READY_SERVER_ENDED: u8 = 32;
+let _READY_SERVER_BITS: u8 = 44;      // everything about the server socket (kept apart so a retry can forget it)
 
 let _EVENT_KIND_LISTENER: u64 = 1;
 let _EVENT_KIND_CLIENT: u64 = 2;
@@ -48,8 +63,10 @@ struct _ConnectionSlot {
     client_fd: i32,
     server_fd: i32,
     client_mask: u32,            // the epoll interest set now on each fd
-    client_registered: bool,     // the client is in epoll: forwarded connections join it when the connect finishes (one syscall less)
+    client_registered: bool,     // the client is in epoll
     server_mask: u32,
+    ready: u8,                   // edge-triggered readiness, see _READY_*: set by events, cleared when recv/send says there is no more
+    queued: bool,                // on the worker's ready list
     listener: u16,
     user: u32,
     started_ms: i64,             // when the connection was accepted, or the current connect attempt began (their timeouts)
@@ -169,7 +186,7 @@ fn _wake_waiting_read(w: Worker&) {
                 let dir .= _direction_of(s, up);
                 if dir.waiting {
                     dir.waiting = false;
-                    _update_epoll_interest(w, slot);
+                    if s.state == _STATE_HANDLING { _update_epoll_interest(w, slot); } else { _queue_ready(w, slot); }
                     break;
                 }
             }
@@ -190,8 +207,6 @@ fn _direction_of(s: _ConnectionSlot&, up: bool) -> _Direction& {
     return s.down;
 }
 
-fn _direction_can_read(d: _Direction) -> bool { return !d.eof && !d.waiting && d.len == d.pos; }
-fn _direction_has_pending_bytes(d: _Direction) -> bool { return d.len > d.pos; }
 
 // Sets each fd's epoll interest to what the slot's state needs: read a source only when its direction has
 // nothing unwritten and is not waiting for a buffer; wait for writability only where bytes are pending.
@@ -219,18 +234,6 @@ fn _update_epoll_interest(w: Worker&, i: i64) {
         if s.out_count > 0 { m |= c_EPOLLOUT; }
         _set_client_interest(w, i, m);
         return;
-    }
-    if s.state != _STATE_FORWARDING { return; }
-    var cm: u32 = 0;
-    var sm: u32 = 0;
-    if _direction_can_read(s.up) { cm |= c_EPOLLIN; }
-    if _direction_has_pending_bytes(s.down) { cm |= c_EPOLLOUT; }
-    if _direction_can_read(s.down) { sm |= c_EPOLLIN; }
-    if _direction_has_pending_bytes(s.up) { sm |= c_EPOLLOUT; }
-    _set_client_interest(w, i, cm);
-    if sm != s.server_mask {
-        c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.server_fd, sm, _pack_event_data(_EVENT_KIND_SERVER, i, s.gen));
-        s.server_mask = sm;
     }
 }
 
@@ -308,7 +311,7 @@ fn _reject_connection(w: Worker&, fd: i32, reason: CloseReason) {
 fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool, now: i64) -> _ConnectionSlot {
     return _ConnectionSlot {
         gen: gen, live: true, state: if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING }, client_fd: fd, server_fd: -1,
-        client_mask: if inspect { c_EPOLLIN } else { 0 }, client_registered: false, server_mask: 0, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
+        client_mask: if inspect { c_EPOLLIN } else { 0 }, client_registered: false, server_mask: 0, ready: 0, queued: false, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
         inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tag: 0, target_gen: 0, override_target: -1,
         out_buffers: [-1; 4], out_lengths: [0; 4], out_count: 0, out_pos: 0, consumed: false, paused: false,
         data_pending: false, want_writable: false, closing: false, closing_reason: CloseReason.PeerClosed,
@@ -442,6 +445,22 @@ fn _end_inspection(w: Worker&, i: i64) {
     if s.rcvlowat_raised { c_set_rcvlowat(s.client_fd, 1); s.rcvlowat_raised = false; }
 }
 
+// Puts the client into epoll for good, edge-triggered. A client that was watched level-triggered (it was inspected, or a
+// handler had it) is modified instead, and counts as readable and writable until a recv or send says otherwise.
+fn _register_client_edge(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    let mask = c_EPOLLIN | c_EPOLLOUT | c_EPOLLRDHUP | c_EPOLLET;
+    let data = _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen);
+    if s.client_registered {
+        c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, mask, data);
+        s.ready |= _READY_CLIENT_IN | _READY_CLIENT_OUT;
+    } else {
+        if c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, s.client_fd, mask, data) < 0 { _close_connection(w, i, CloseReason.Error); return; }
+        s.client_registered = true;
+    }
+    s.client_mask = mask;
+}
+
 // Forwarding: the client is left alone until the server answers. The built-in policy: connection k starts at
 // address k mod n and moves on, wrapping, after each failure.
 fn _start_connecting(w: Worker&, i: i64, count: i64) {
@@ -450,7 +469,8 @@ fn _start_connecting(w: Worker&, i: i64, count: i64) {
     w._round_robin++;
     s.attempts = 0;
     _end_inspection(w, i);
-    _set_client_interest(w, i, 0);
+    _register_client_edge(w, i);
+    if !s.live { return; }
     s.state = _STATE_CONNECTING;
     _attempt_connect(w, i);
 }
@@ -502,7 +522,7 @@ fn _attempt_connect(w: Worker&, i: i64) {
         if _parse_address(target.addrs[index].text, p) { sfd = c_connect_start(p.v6, p.ip, p.port); }
         if sfd >= 0 {
             s.server_fd = sfd;
-            s.server_mask = c_EPOLLOUT;
+            s.server_mask = c_EPOLLIN | c_EPOLLOUT | c_EPOLLRDHUP | c_EPOLLET;
             c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, sfd, s.server_mask, _pack_event_data(_EVENT_KIND_SERVER, i, s.gen));
             return;
         }
@@ -516,6 +536,7 @@ fn _connect_failed(w: Worker&, i: i64) {
     c_close(s.server_fd);                                  // closing removes it from epoll
     s.server_fd = -1;
     s.server_mask = 0;
+    s.ready = s.ready & (255 - _READY_SERVER_BITS);        // whatever the failed attempt reported is void
     _count_connect_failure(w, s.attempts, _target_of(w, s).addrs.len);
     _attempt_connect(w, i);
 }
@@ -524,91 +545,123 @@ fn _connect_finished(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
     if c_connect_result(s.server_fd) != 0 { _connect_failed(w, i); return; }
     s.state = _STATE_FORWARDING;
-    _update_epoll_interest(w, i);
+    s.ready |= _READY_SERVER_OUT;                          // a finished connect is writable; its edge was this event
+    _pump(w, i);
 }
 
 // --- moving bytes -------------------------------------------------------------------------------------------------
 
-// One read from the source of a direction (`up`: the client), then as much of it written as the destination takes.
-// Reads one buffer's worth and starts writing it. Returns the bytes read when the whole buffer was written at once
-// and the connection is still ready for more, else 0 (stopped, blocked, ended or closed).
-fn _read_once(w: Worker&, i: i64, up: bool) -> i64 {
+fn _flag_readable(up: bool) -> u8 { return if up { _READY_CLIENT_IN } else { _READY_SERVER_IN }; }        // the source of the direction
+fn _flag_writable(up: bool) -> u8 { return if up { _READY_SERVER_OUT } else { _READY_CLIENT_OUT }; }      // its destination
+fn _flag_ended(up: bool) -> u8 { return if up { _READY_CLIENT_ENDED } else { _READY_SERVER_ENDED }; }    // its source's peer ended
+
+fn _forget(s: _ConnectionSlot&, flag: u8) { s.ready = s.ready & (255 - flag); }
+
+// Adds a connection to the ready list: it has work left that no event will announce.
+fn _queue_ready(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    if !s.live || s.queued { return; }
+    s.queued = true;
+    w._ready.push(_pack_event_data(0, i, s.gen));
+}
+
+// Runs the connections queued so far (those queued meanwhile wait for the next pass, so nobody is starved).
+fn _run_ready(w: Worker&) {
+    let end = w._ready.len;
+    while w._ready_head < end {
+        let e = w._ready[w._ready_head];
+        w._ready_head++;
+        let slot = (e >> 32) as i64;
+        let gen = ((e >> 8) & 0xffffff) as u32;
+        let s .= w._connection_slots[slot];
+        if s.live && s.gen == gen {
+            s.queued = false;
+            if s.state == _STATE_FORWARDING { _pump(w, slot); }
+        }
+    }
+    if w._ready_head >= w._ready.len {
+        w._ready.clear();
+        w._ready_head = 0;
+    }
+}
+
+// Moves bytes in both directions as far as the readiness flags allow.
+fn _pump(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    let more_up = _pump_direction(w, i, true);
+    if !s.live { return; }
+    let more_down = _pump_direction(w, i, false);
+    if !s.live { return; }
+    if more_up || more_down { _queue_ready(w, i); }
+}
+
+// Reads from the source and writes to the destination of one direction (`up`: client to server) until one of them has
+// nothing more to give or take. Returns true when it stopped only because it moved _WAKEUP_BUDGET bytes (the others get
+// a turn; the connection is queued to go on), false when it is blocked, finished or closed.
+fn _pump_direction(w: Worker&, i: i64, up: bool) -> bool {
     let s .= w._connection_slots[i];
     let dir .= _direction_of(s, up);
     let src = if up { s.client_fd } else { s.server_fd };
     let dst = if up { s.server_fd } else { s.client_fd };
-    if !_direction_can_read(dir) { return 0; }                      // a stale readiness: nothing to do
+    let readable = _flag_readable(up);
+    let writable = _flag_writable(up);
+    var moved: i64 = 0;
+    loop {
+        if dir.len > dir.pos {                                        // bytes read but not written yet
+            if (s.ready & writable) == 0 { return false; }            // destination full: its writable edge restarts us
+            if !_write_buffer(w, i, up, dst) { return false; }
+        }
+        if dir.eof || dir.waiting { return false; }
+        if (s.ready & readable) == 0 { return false; }
+        if moved >= _WAKEUP_BUDGET { return true; }
 
-    if dir.buf < 0 {
         let b = _take_buffer(w);
-        if b < 0 {                                        // pool empty: wait, do not read
+        if b < 0 {                                                    // pool empty: wait, do not read
             dir.waiting = true;
             w._waiting_reads.push(_pack_event_data(if up { 1 } else { 0 }, i, s.gen));
             w._stats.buffer_waits++;
-            _update_epoll_interest(w, i);
-            return 0;
+            return false;
         }
         dir.buf = b;
-    }
-    let buf = _buffer_slice(w, dir.buf);
-    let n = c_recv(src, buf[0], buf.len);
-    if n > 0 {
-        dir.len = n as i32;
+        let buf = _buffer_slice(w, b);
+        let n = c_recv(src, buf[0], buf.len);
+        if n > 0 {
+            dir.len = n as i32;
+            dir.pos = 0;
+            moved += n;
+            s.last_active_ms = w._now_ms;
+            // A short read means the socket is drained, unless its peer already ended: then the next read says so.
+            if n < buf.len && (s.ready & _flag_ended(up)) == 0 { _forget(s, readable); }
+            continue;
+        }
+        // Nothing to keep: give the buffer back before anything else.
+        let held = dir.buf;
+        dir.buf = -1;
+        dir.len = 0;
         dir.pos = 0;
-        s.last_active_ms = w._now_ms;
-        _flush_direction(w, i, up);
-        if !s.live || dir.buf >= 0 { return 0; }              // closed, or the write blocked: epoll tells us when to go on
-        return if n == buf.len { n } else { 0 };              // a short read means the socket is drained
-    }
-    // Nothing to keep: give the buffer back before anything else.
-    let held = dir.buf;
-    dir.buf = -1;
-    dir.len = 0;
-    dir.pos = 0;
-    _give_back_buffer(w, held);
-    if n == 0 {                                           // the source ended: tell the destination, stop reading
-        dir.eof = true;
-        if s.half_closed_at_ms == 0 { s.half_closed_at_ms = w._now_ms; }
-        _shutdown_unless_closing(s, up, dst);
-        dir.shut = true;
-        _finish_or_update_interest(w, i);
-        return 0;
-    }
-    if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) {
-        _update_epoll_interest(w, i);
-        return 0;
-    }
-    _close_connection(w, i, CloseReason.PeerReset);
-    return 0;
-}
-
-// Keeps reading and writing while the source has more, but gives up after _WAKEUP_BUDGET bytes so one busy
-// connection cannot starve the others (RT-5f); epoll is level-triggered, so the rest is reported again.
-fn _read_direction(w: Worker&, i: i64, up: bool) {
-    var moved: i64 = 0;
-    while moved < _WAKEUP_BUDGET {
-        let n = _read_once(w, i, up);
-        if n == 0 { return; }
-        moved += n;
+        _give_back_buffer(w, held);
+        if n == 0 {                                                   // the source ended: tell the destination, stop reading
+            dir.eof = true;
+            if s.half_closed_at_ms == 0 { s.half_closed_at_ms = w._now_ms; }
+            _shutdown_unless_closing(s, up, dst);
+            dir.shut = true;
+            if s.up.eof && s.up.shut && s.down.eof && s.down.shut { _close_connection(w, i, CloseReason.PeerClosed); }
+            return false;
+        }
+        if n == -(c_EAGAIN as i64) { _forget(s, readable); return false; }
+        if n == -(c_EINTR as i64) { return true; }                    // interrupted: try again on the next pass
+        _close_connection(w, i, CloseReason.PeerReset);
+        return false;
     }
 }
 
-// Writes the bytes a direction holds to its destination. Whatever the destination does not take stays in
-// the buffer and EPOLLOUT is switched on; reading from the source stays off until it is all written.
-// Tells the destination that this direction ended, unless the other direction has already ended too: then the
-// connection closes right away and the close itself sends the FIN (one syscall less per connection).
-fn _shutdown_unless_closing(s: _ConnectionSlot&, up: bool, dst: i32) {
-    let other .= _direction_of(s, !up);
-    if other.eof && other.shut { return; }
-    c_shutdown_wr(dst);
-}
-
-fn _flush_direction(w: Worker&, i: i64, up: bool) {
+// Writes what a direction holds. True when all of it went out (the buffer is back in the pool); false when the destination
+// is full (its writable flag is cleared) or the connection was closed.
+fn _write_buffer(w: Worker&, i: i64, up: bool, dst: i32) -> bool {
     let s .= w._connection_slots[i];
     // Under a tag nothing is written, in either direction, once its deadline has passed (RT-6a): the bytes just read are dropped.
-    if !_tag_allows(w, s.tag) { _close_connection(w, i, CloseReason.Fenced); return; }
+    if !_tag_allows(w, s.tag) { _close_connection(w, i, CloseReason.Fenced); return false; }
     let dir .= _direction_of(s, up);
-    let dst = if up { s.server_fd } else { s.client_fd };
     while dir.pos < dir.len {
         let buf = _buffer_slice(w, dir.buf);
         let rest = buf[dir.pos..dir.len];
@@ -617,12 +670,12 @@ fn _flush_direction(w: Worker&, i: i64, up: bool) {
             dir.pos += n as i32;
             s.last_active_ms = w._now_ms;
             if up { w._stats.bytes_in += n; } else { w._stats.bytes_out += n; }
-        } else if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) {
-            _update_epoll_interest(w, i);                     // wait for EPOLLOUT
-            return;
-        } else {
+        } else if n == -(c_EAGAIN as i64) {
+            _forget(s, _flag_writable(up));
+            return false;
+        } else if n != -(c_EINTR as i64) {
             _close_connection(w, i, CloseReason.PeerReset);
-            return;
+            return false;
         }
     }
     // Everything written: the buffer goes back, so an idle connection holds none.
@@ -631,22 +684,15 @@ fn _flush_direction(w: Worker&, i: i64, up: bool) {
     dir.len = 0;
     dir.pos = 0;
     _give_back_buffer(w, held);
-    if dir.eof && !dir.shut {
-        _shutdown_unless_closing(s, up, dst);
-        dir.shut = true;
-    }
-    _finish_or_update_interest(w, i);
+    return true;
 }
 
-// Both directions ended and told their destinations: the connection is over. Otherwise re-evaluate interest.
-fn _finish_or_update_interest(w: Worker&, i: i64) {
-    let s .= w._connection_slots[i];
-    if !s.live { return; }
-    if s.up.eof && s.up.shut && s.down.eof && s.down.shut {
-        _close_connection(w, i, CloseReason.PeerClosed);
-        return;
-    }
-    _update_epoll_interest(w, i);
+// Tells the destination that this direction ended, unless the other direction has already ended too: then the
+// connection closes right away and the close itself sends the FIN (one syscall less per connection).
+fn _shutdown_unless_closing(s: _ConnectionSlot&, up: bool, dst: i32) {
+    let other .= _direction_of(s, !up);
+    if other.eof && other.shut { return; }
+    c_shutdown_wr(dst);
 }
 
 // --- the event loop's dispatch ---------------------------------------------------------------------------------
@@ -668,7 +714,6 @@ fn _dispatch_event(w: Worker&, data: u64, events: u32) {
     let s .= w._connection_slots[slot];
     if !s.live || s.gen != gen { w._stats.stale_events++; return; }
 
-    let failed = (events & (c_EPOLLERR | c_EPOLLHUP)) != 0;
     if s.state == _STATE_INSPECTING {
         if (events & c_EPOLLERR) != 0 { _close_connection(w, slot, CloseReason.PeerReset); return; }
         if kind == _EVENT_KIND_CLIENT { _inspect_connection(w, slot); }           // input, or the peer ended
@@ -687,23 +732,20 @@ fn _dispatch_event(w: Worker&, data: u64, events: u32) {
         }
         return;
     }
+    // A forwarded connection (connecting or forwarding): the event only says what the sockets can do now.
+    let from_client = kind == _EVENT_KIND_CLIENT;
+    let in_flag = if from_client { _READY_CLIENT_IN } else { _READY_SERVER_IN };
+    let out_flag = if from_client { _READY_CLIENT_OUT } else { _READY_SERVER_OUT };
+    let ended_flag = if from_client { _READY_CLIENT_ENDED } else { _READY_SERVER_ENDED };
+    if (events & (c_EPOLLIN | c_EPOLLHUP | c_EPOLLRDHUP)) != 0 { s.ready |= in_flag; }
+    if (events & (c_EPOLLOUT | c_EPOLLHUP)) != 0 { s.ready |= out_flag; }       // a hung-up socket "can write": the write fails and says so
+    if (events & (c_EPOLLRDHUP | c_EPOLLHUP)) != 0 { s.ready |= ended_flag; }
     if s.state == _STATE_CONNECTING {
-        if kind == _EVENT_KIND_SERVER { _connect_finished(w, slot); }
-        else if failed { _close_connection(w, slot, CloseReason.PeerReset); }
+        // A client that hangs up while we connect is only noted (its flags): the connect finishes or fails first, and a
+        // finished one finds the hang-up on its first read or write. That costs at most one wasted backend connect.
+        if !from_client { _connect_finished(w, slot); }                          // success, refusal or error: the socket says which
         return;
     }
-    let from_client = kind == _EVENT_KIND_CLIENT;
     if (events & c_EPOLLERR) != 0 { _close_connection(w, slot, CloseReason.PeerReset); return; }
-    if (events & c_EPOLLOUT) != 0 {
-        _flush_direction(w, slot, !from_client);                  // client writable: finish `down`; server writable: `up`
-        if !s.live { return; }
-    }
-    if (events & (c_EPOLLIN | c_EPOLLHUP)) != 0 {
-        let dir .= _direction_of(s, from_client);
-        if (events & c_EPOLLIN) == 0 && !_direction_can_read(dir) {
-            _close_connection(w, slot, CloseReason.PeerReset);    // hung up while we were not reading it
-            return;
-        }
-        _read_direction(w, slot, from_client);
-    }
+    _pump(w, slot);
 }

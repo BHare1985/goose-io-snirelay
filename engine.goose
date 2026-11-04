@@ -92,6 +92,8 @@ root struct Worker {
     _waiting_reads_head: i64 = 0,
     _inspect_buffer: u8[32768] = [0; 32768],     // where a ClientHello is peeked at: one per worker, one inspect at a time
     _inspect_scratch: u8[16384] = [0; 16384],    // where parse_hello reassembles a hello split over records
+    _ready: u64[>..] = [],                       // connections with work left after a pass (edge-triggered: nothing else will wake them)
+    _ready_head: i64 = 0,
     _pending: _PendingEvent[>..] = [],           // handler events queued during a batch, drained by serve (handler.goose)
     _pending_head: i64 = 0,
     _override_targets: Target[>..] = [],         // targets given to forward(); a free entry has no addresses
@@ -144,7 +146,8 @@ fn serve<F>(w: Worker&) {
     var last_tick: i64 = 0;
     var last_sweep: i64 = 0;
     loop {
-        let n = c_epoll_wait(w._epoll_fd, events[0], 256, 100);
+        let wait_ms: i32 = if w._ready_head < w._ready.len { 0 } else { 100 };     // work left over: do not sleep
+        let n = c_epoll_wait(w._epoll_fd, events[0], 256, wait_ms);
         w._now_ms = c_boottime_ms();
         // Messages first, then deadlines, then events: a drain or a fence must not be outrun by traffic in the same pass.
         if n > 0 { for k in n { if (events[k].data & 0xff) == _EVENT_KIND_MESSAGE { _read_messages(w); } } }
@@ -154,6 +157,7 @@ fn serve<F>(w: Worker&) {
         } else {
             for k in n { if (events[k].data & 0xff) != _EVENT_KIND_MESSAGE { _dispatch_event(w, events[k].data, events[k].events); } }
         }
+        _run_ready(w);
         _deliver_events(w, F);
         if _drain_finished(w) { _deliver_events(w, F); return; }
         let now = w._now_ms;
