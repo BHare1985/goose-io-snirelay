@@ -35,5 +35,28 @@ for src in tests/unit/*_test.goose tests/net/*_test.goose; do
         failed=$((failed + 1))
     fi
 done
+# Network tests: build the system under test once (with --debug), then run each driver.
+net_drivers=(tests/net/*_test.py)
+if [ -e "${net_drivers[0]}" ]; then
+    if "$GOOSE" build --debug -o "$work/forward_server" tests/net/harness/forward_server.goose >"$work/forward_server.build.log" 2>&1; then
+        export FORWARD_SERVER="$work/forward_server"
+        for drv in "${net_drivers[@]}"; do
+            name="$(basename "$drv" .py)"
+            case "$drv" in *"$filter"*) ;; *) continue ;; esac
+            rows="$(sed -n 's|^# Proves: *\([^(]*\).*|\1|p' "$drv" | head -1)"
+            ran=$((ran + 1))
+            if timeout 600 python3 "$drv" >"$work/$name.out" 2>&1; then
+                echo "PASS  $name   rows: ${rows:-none}   $(tail -1 "$work/$name.out")"
+            else
+                echo "FAIL  $name   rows: ${rows:-none}   $(tail -1 "$work/$name.out")"
+                grep -E '^(FAIL|SKIP)' "$work/$name.out" | head -8 | sed 's/^/    /'
+                failed=$((failed + 1))
+            fi
+        done
+    else
+        echo "BUILD FAILED  tests/net/harness/forward_server.goose"; sed 's/^/    /' "$work/forward_server.build.log" | head -20
+        failed=$((failed + 1))
+    fi
+fi
 echo "$ran test file(s) run, $failed failed"
 [ "$failed" -eq 0 ]

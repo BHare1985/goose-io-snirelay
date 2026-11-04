@@ -88,6 +88,28 @@ fn pause_reading(w: Worker&, c: Conn, paused: bool) {}
 // false (and does nothing) afterwards (RT-4e).
 fn forward(w: Worker&, c: Conn, to: Target) -> bool { return false; }
 
+// --- stats ---------------------------------------------------------------------------------------
+
+// A snapshot of one worker's counters (design/03-engine.md section 9). Flat. Read it on the worker's
+// own thread, for example from a Tick event; nothing is shared between workers, so there is no lock.
+// (Sessions per tag arrive with tags in M4.)
+struct Stats {
+    accepted: i64,            // connections accepted
+    open: i64,                // connections open now
+    closed: i64[10],          // connections closed, by CloseReason in declaration order
+    bytes_in: i64,            // client to server, forwarded
+    bytes_out: i64,           // server to client, forwarded
+    connect_failures: i64,    // outgoing connects that failed
+    retries: i64,             // of those, the ones retried on another address
+    buffers_total: i64,       // buffers in this worker's pool
+    buffers_in_use: i64,      // buffers borrowed right now
+    buffer_waits: i64,        // times a read had to wait for a free buffer
+}
+
+fn stats(w: Worker&) -> Stats {
+    return Stats { 0, 0, [0; 10], 0, 0, 0, 0, 0, 0, 0 };        // STUB
+}
+
 // --- running workers and talking to them --------------------------------------------------------
 
 // Starts `n` workers, each running `worker(cfg, index)`. It first creates one message pipe per

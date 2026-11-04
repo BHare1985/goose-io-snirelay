@@ -196,6 +196,18 @@ if !tcprouter::start(w, cfg, index) { return; }
 tcprouter::serve(w, p) { w, ev => };               // the engine calls p's functions; see doc 07
 ```
 
+## 5b. Stats of a worker
+
+```goose
+fn stats(w: Worker&) -> Stats     // a flat snapshot; call it on the worker's thread, e.g. from Tick
+// Stats { accepted, open, closed[10] (by CloseReason), bytes_in (client to server), bytes_out,
+//         connect_failures, retries, buffers_total, buffers_in_use, buffer_waits }
+```
+
+Counters are per worker and never shared. The M2 tests read them from a `Tick` block (they need to see
+`buffers_in_use` and `buffer_waits` from outside); M4 adds sessions per tag and `Message.Stats`, which
+gathers every worker's snapshot (RT-10b).
+
 ## 6. Messages to running workers
 
 ```goose

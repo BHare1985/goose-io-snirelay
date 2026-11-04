@@ -44,7 +44,6 @@ struct tr_Slot {                                       // one per connection, in
     tag: u16,                  // handler tag or forward tag (for close-tagged)
     retry: Retry,              // which target addresses were tried
     last_active_ms: i64,
-    inflight: u8,              // kernel ops that still refer to this slot (0 with epoll; kept for safety)
 }
 
 struct Side { fd: i32, buf: i32 = -1, len: u32, pos: u32, eof: bool, shut_wr: bool, paused: bool }
@@ -54,8 +53,7 @@ struct Side { fd: i32, buf: i32 = -1, len: u32, pos: u32, eof: bool, shut_wr: bo
   side/kind (listener, client, server, message pipe). An event whose gen differs from the slot's
   is stale and dropped (RT-2b). **Validate the slot index before use** (goose-kb rule MUST-4):
   an out-of-range index from the kernel must not abort the worker.
-- **A slot is freed only when its fds are closed and `inflight == 0`.** With epoll that is
-  immediate.
+- **A slot is freed when its fds are closed**, and its generation is bumped at that moment.
 - **Hot and cold fields:** start with one struct. Split into parallel arrays only if `bench/`
   shows it matters (doc README ground rule 2).
 

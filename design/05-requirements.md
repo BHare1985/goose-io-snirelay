@@ -11,7 +11,7 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-1a | A worker listens on every configured IPv4 and IPv6 address and accepts connections | v1 | `listen_test` | design |
+| RT-1a | A worker listens on every configured IPv4 and IPv6 address and accepts connections | v1 | `listen_test` | red (awaiting approval) |
 | RT-1b | N workers on one port share new connections: with 4 workers and 400 connections, each worker gets at least 50 | v1 | `listen_test` | design |
 | RT-1c | `check(cfg)` rejects: duplicate listener ids, a route to an unknown listener, `Sni` rows on a listener without `inspect: Sni`, empty targets; each with a message naming the field | v1 | `config_test` | green |
 | RT-1d | Starting while another process holds the port fails with an error naming the address, instead of silently sharing it | v1 | `listen_test` | design |
@@ -41,8 +41,8 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-4a | Bytes are forwarded both ways exactly (64 clients × 10 MB random, checksums match) | v1 | `forward_test` | design |
-| RT-4b | Half-close: client shuts down writing → backend sees EOF, and the backend's remaining reply still reaches the client; and the reverse | v1 | `forward_test` | design |
+| RT-4a | Bytes are forwarded both ways exactly (64 clients × 10 MB random, checksums match) | v1 | `forward_test` | red (awaiting approval) |
+| RT-4b | Half-close: client shuts down writing → backend sees EOF, and the backend's remaining reply still reaches the client; and the reverse | v1 | `forward_test` | red (awaiting approval) |
 | RT-4c | A refused or timed-out connect is retried on the next target address **before any client byte is consumed**, and the client sees a normal reply | v1 | `retry_test` | design |
 | RT-4d | When every target fails, the client connection is closed and `connect_failed` counted | v1 | `retry_test` | design |
 | RT-4e | `forward(c, target)` from handler mode works only before any byte was consumed; afterwards it is refused | v1 | `handler_test` | design |
@@ -53,10 +53,10 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-5a | An idle forwarded connection holds no pool buffer | v1 | `memory_test` | design |
-| RT-5b | Memory per idle connection ≤ 512 bytes of worker memory beyond kernel socket buffers (RSS growth over 10,000 idle) | v1 | `memory_test` | design |
-| RT-5c | A destination that stops reading stops the engine reading from the source; RSS grows ≤ 64 MB while 1 GB is offered (measured growth printed each run) | v1 | `backpressure_test` | design |
-| RT-5d | With the pool exhausted, the worker keeps serving other connections as buffers return; no abort, waits counted | v1 | `backpressure_test` | design |
+| RT-5a | An idle forwarded connection holds no pool buffer | v1 | `memory_test` | red (awaiting approval) |
+| RT-5b | Memory per idle connection ≤ 512 bytes of worker memory beyond kernel socket buffers (RSS growth over 10,000 idle) | v1 | `memory_test` | red (awaiting approval) |
+| RT-5c | A destination that stops reading stops the engine reading from the source; RSS grows ≤ 64 MB while 1 GB is offered (measured growth printed each run) | v1 | `backpressure_test` | red (awaiting approval) |
+| RT-5d | With the pool exhausted, the worker keeps serving other connections as buffers return; no abort, waits counted | v1 | `backpressure_test` | red (awaiting approval) |
 | RT-5e | Handler `send` returns false at the per-connection cap and `Writable` follows once drained; memory stays bounded | v1 | `handler_test` | design |
 | RT-5f | One busy connection can't starve others: with one 1 GB stream and 100 small request/reply clients, small p99 < 10 ms | v1 | `fairness_test` | design |
 | RT-5g | No allocation on the established forwarding path (Goose `--stats` or data-stack high-water flat across 10 GB forwarded) | v1 | `memory_test` | design |
