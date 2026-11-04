@@ -24,3 +24,6 @@ Still open: lifetime-checker error messages in practice, `thread_spawn_contained
 17. [V] No per-thread queue: broadcast = pipe per worker, created before `thread_spawn`; configs of 66 KB pass as thread args.
 18. [V] signalfd works for SIGTERM/SIGINT with `sigset_t` as `u8[128]`; no C.
 19. [V] Generic engine can call policy fns via UFCS (`p.pick(…)`); plain-call form does not cross namespaces.
+20. [V] Goose moves daily: at 751794c (7 commits after dcaf1ef) `root struct` still cannot nest another root (e.g. a slot_pool inside a root) nor be returned. Re-test these when updating; `bin/update-goose.sh` fetches and rebuilds (the full rebuild is about 10 minutes, main.cpp dominates).
+21. [V] Library root types (`slot_pool`, `slice_pool`) are implemented in Goose with `root struct`; own tables = own root fields, one data stack each.
+22. [V] A --debug test catches real bugs: my first sni.goose indexed `rest[0]` on an empty slice and aborted with "index 0 out of bounds"; fixed by checking `rest.len >= 1` first.

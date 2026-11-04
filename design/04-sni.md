@@ -39,6 +39,13 @@ byte other than `0x16` is `NotTls` (alerts and SSLv2 hellos included); `NeedMore
 the bytes given and not exceed the full record, but needn't be exact; an IPv4 literal passes the
 name rule (RFC 6066 forbids it, clients don't send it, and it simply won't match a route).
 
+**Differences from the C proxy's `sni_route`/`sni_lookup` (Brian, 2026-11-04):** it returns a route index
+and closes any client whose first byte is not a TLS handshake; here the parser returns a `Hello` and
+matching is separate, so a non-TLS client is routed by `NoSni`/`Any` (RT-3g). It accepts any bytes as a
+name; here a name is checked (charset, 253 bytes). It rejects a record whose major version is not 3,
+an empty record and a record over 16384 bytes; so does this, and a handshake message over 16384 bytes
+is also `Invalid`. Same: a hello without extensions has no name; the first `host_name` entry wins.
+
 ## Test vectors (all required, test file `tests/sni_test.goose`)
 
 | # | Input | Expect |

@@ -33,8 +33,8 @@ Columns: id · behaviour · priority · test · status.
 | RT-3b | SNI routing: exact (case-insensitive, trailing dot ignored), then longest suffix, then `NoSni`, then `Any`; first in config order within a kind | v1 | `route_test` | design |
 | RT-3c | The backend of a forwarded SNI connection receives the client's bytes from byte 0, unchanged (ClientHello not consumed) | v1 | `forward_test` | design |
 | RT-3d | A client that sends nothing within `inspect_timeout_ms` is closed | v1 | `timeout_test` | design |
-| RT-3e | The parser passes vectors S1–S12 (doc 04) | v1 | `sni_test` | red (approved) |
-| RT-3f | A ClientHello over 16 KB is closed, not buffered | v1 | `sni_test`, `route_test` | red (approved): sni_test half |
+| RT-3e | The parser passes vectors S1–S12 (doc 04) | v1 | `sni_test` | green |
+| RT-3f | A ClientHello over 16 KB is closed, not buffered | v1 | `sni_test`, `route_test` | green: sni_test half; route_test pending |
 | RT-3g | A non-TLS client on an `inspect: Sni` listener is routed after its first byte (no wait) | v1 | `route_test` | design |
 
 ## RT-4 Forwarding

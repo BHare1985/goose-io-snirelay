@@ -1,7 +1,8 @@
 # Goose Master Guide (scoped to the TCP-proxy project)
 
-**Version studied:** `goose dcaf1ef (runtime f2efb7e50b49)`, repo `aardappel/goose` commit
-`dcaf1efa65247441e13070fbec5849d9142ade3c` (2026-11-01), built with gcc 15.2.0.
+**Version in use:** `goose 751794c (runtime f2efb7e50b49)` (updated 2026-11-04 with `goose-kb/bin/update-goose.sh`;
+first studied at `dcaf1ef`, 7 commits earlier, no language-surface change), repo `aardappel/goose`, built with gcc 15.2.0.
+**Always run `goose-kb/bin/update-goose.sh --check` at the start of a session.**
 Source: `upstream/goose/`, compiler: `upstream/build/goose`, wrapper: `bin/goose`.
 
 **Scope note.** The user steered this work toward *designing a TCP proxy in Goose*, so the research was

@@ -12,7 +12,7 @@ proved by a test under [tests/](tests/). Nothing is released.
 import tcprouter from "github.com/bhare1985/tcprouter@v0";
 ```
 
-Needs Goose (tested with `goose dcaf1ef`), `git` to fetch the package, and a C compiler: the package carries
+Needs Goose (tested with `goose 751794c`), `git` to fetch the package, and a C compiler: the package carries
 one small C file (`src/tr_sys.c`).
 
 ## Examples
