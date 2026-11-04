@@ -545,3 +545,38 @@ class ProcessBackend:
     def stop(self):
         self.proc.terminate()
         self.proc.wait()
+
+
+class BlackholeBackend:
+    """An address where a connect never completes, with no firewall and no root: a listen(0) socket whose accept queue is
+    filled, so further SYNs are dropped and the connecting side waits (and retransmits) until its own timeout."""
+    def __init__(self, port, host="127.0.0.1"):
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind((host, port))
+        self.sock.listen(0)
+        self.fillers = []
+        for _ in range(8):                          # fill the accept queue; the later ones just hang
+            f = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            f.setblocking(False)
+            try:
+                f.connect((host, port))
+            except BlockingIOError:
+                pass
+            self.fillers.append(f)
+        time.sleep(0.2)
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.settimeout(0.4)
+        try:
+            probe.connect((host, port))
+            raise RuntimeError("the blackhole accepted a connection: the accept queue is not full")
+        except socket.timeout:
+            pass
+        finally:
+            probe.close()
+
+    def stop(self):
+        for f in self.fillers:
+            f.close()
+        self.sock.close()

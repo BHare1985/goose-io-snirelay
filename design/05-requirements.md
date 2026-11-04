@@ -43,7 +43,7 @@ Columns: id · behaviour · priority · test · status.
 |---|---|---|---|---|
 | RT-4a | Bytes are forwarded both ways exactly (64 clients × 10 MB random, checksums match) | v1 | `forward_test` | done |
 | RT-4b | Half-close: client shuts down writing → backend sees EOF, and the backend's remaining reply still reaches the client; and the reverse | v1 | `forward_test` | done |
-| RT-4c | A refused or timed-out connect is retried on the next target address **before any client byte is consumed**, and the client sees a normal reply | v1 | `retry_test` | green (refused half; timed-out half in M4) |
+| RT-4c | A refused or timed-out connect is retried on the next target address **before any client byte is consumed**, and the client sees a normal reply | v1 | `retry_test` | refused half green; timed-out half red (awaiting approval) |
 | RT-4d | When every target fails, the client connection is closed and `connect_failed` counted | v1 | `retry_test` | green |
 | RT-4e | `forward(c, target)` from handler mode works only before any byte was consumed; afterwards it is refused | v1 | `handler_test` | green |
 | RT-4f | Throughput and p99 latency within 10% of the C proxy's copy engine on the same host (`bench/`) | v2 | `bench/compare.sh` | design |
@@ -68,17 +68,17 @@ Columns: id · behaviour · priority · test · status.
 | RT-6a | Past a tag's deadline, **zero** bytes are forwarded to or from that tag's servers, also after the process was frozen (SIGSTOP) across the deadline and resumed | v1 | `deadline_test` (frozen case) | design |
 | RT-6b | `CloseTagged(tag, gen)` closes every matching connection within one loop pass, before handling further events | v1 | `deadline_test` | design |
 | RT-6c | Deadlines are on `CLOCK_BOOTTIME` | v1 | `deadline_test` (unit, clock source) | design |
-| RT-6d | A deadline message with an earlier deadline than one already set never extends it; a duplicate is harmless | v1 | `deadline_test` | design |
+| RT-6d | Deadlines are absolute and the latest wins: a later `until_ms` renews, an earlier or equal one is ignored, so a delayed old message or a duplicate can neither shorten nor stretch a deadline. Revoking is `CloseTagged` or a fence, never a smaller deadline | v1 | `deadline_test` | design |
 | RT-6e | A tag can start fenced (no deadline yet = no connections) | v1 | `deadline_test` | design |
 
 ## RT-7 Timeouts
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-7a | Connect timeout per attempt | v1 | `timeout_test` | design |
-| RT-7b | Idle timeout closes a connection with no bytes either way | v1 | `timeout_test` | design |
-| RT-7c | Half-close timeout closes a connection left half-open | v1 | `timeout_test` | design |
-| RT-7d | Each timeout fires within its limit + 300 ms | v1 | `timeout_test` | design |
+| RT-7a | Connect timeout per attempt | v1 | `timeout_test` | red (awaiting approval) |
+| RT-7b | Idle timeout closes a connection with no bytes either way | v1 | `timeout_test` | red (awaiting approval) |
+| RT-7c | Half-close timeout closes a connection left half-open | v1 | `timeout_test` | red (awaiting approval) |
+| RT-7d | Each timeout fires within its limit + 300 ms | v1 | `timeout_test` | red (awaiting approval) |
 
 ## RT-8 Lifecycle
 

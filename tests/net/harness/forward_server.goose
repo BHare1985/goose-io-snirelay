@@ -6,7 +6,7 @@
 //                    [--route LISTEN=TARGET[,TARGET…] …]
 //                    [--workers 1] [--buffers 4096] [--buffer-size 16384] [--stat-ms 1000]
 //                    [--inspect-listen ADDR] [--sni NAME=T[,T]] [--sni-suffix NAME=T[,T]] [--sni-none T[,T]] [--sni-any T[,T]]
-//                    [--connect-timeout-ms N] [--inspect-timeout-ms N]
+//                    [--connect-timeout-ms N] [--inspect-timeout-ms N] [--idle-timeout-ms N] [--half-close-timeout-ms N]
 // --inspect-listen: one listener with `inspect: Sni`; the --sni* flags add its routes, in the order given:
 //   --sni exact name, --sni-suffix names below a domain, --sni-none no name / not TLS, --sni-any everything else.
 // --listen/--to: every --listen forwards to every --to. --route: one listener with its own targets
@@ -31,6 +31,8 @@ root struct Options {
     sni_specs: u8[][>..] = [],          // "sni:NAME=T,T", "suffix:NAME=T", "none:T", "any:T", in flag order
     connect_timeout_ms: i64 = 0,
     inspect_timeout_ms: i64 = 0,
+    idle_timeout_ms: i64 = 0,
+    half_close_timeout_ms: i64 = 0,
     workers: i64 = 1,
     buffers: i64 = 4096,
     buffer_size: i64 = 16384,
@@ -113,6 +115,8 @@ fn parse_options(o: Options&) {
         else if flag == "--sni-any" { o.sni_specs.push(str("any:", value)); }
         else if flag == "--connect-timeout-ms" { o.connect_timeout_ms = number(value, flag); }
         else if flag == "--inspect-timeout-ms" { o.inspect_timeout_ms = number(value, flag); }
+        else if flag == "--idle-timeout-ms" { o.idle_timeout_ms = number(value, flag); }
+        else if flag == "--half-close-timeout-ms" { o.half_close_timeout_ms = number(value, flag); }
         else if flag == "--workers" { o.workers = number(value, flag); }
         else if flag == "--buffers" { o.buffers = number(value, flag); }
         else if flag == "--buffer-size" { o.buffer_size = number(value, flag); }
@@ -162,6 +166,8 @@ fn main() {
 
     if o.connect_timeout_ms > 0 { cfg.limits.connect_timeout_ms = o.connect_timeout_ms; }
     if o.inspect_timeout_ms > 0 { cfg.limits.inspect_timeout_ms = o.inspect_timeout_ms; }
+    if o.idle_timeout_ms > 0 { cfg.limits.idle_timeout_ms = o.idle_timeout_ms; }
+    if o.half_close_timeout_ms > 0 { cfg.limits.half_close_timeout_ms = o.half_close_timeout_ms; }
     var have_inspect = false;
     for text in o.inspect_listen {                  // an array of strings can be walked, not indexed
         if !have_inspect {
