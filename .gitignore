@@ -8,3 +8,9 @@ goose-kb/GOOSE_TEST_PROGRAMS/m0/*
 goose-kb/GOOSE_TEST_PROGRAMS/pkg_c_headers/app
 goose-kb/GOOSE_TEST_PROGRAMS/pkg_c_sources/app
 goose-kb/GOOSE_TEST_PROGRAMS/pkg_c_sources/cpkg/tests/t
+# built test binaries
+tests/unit/*
+!tests/unit/*.*
+tests/net/*
+!tests/net/*.*
+!tests/net/
