@@ -13,7 +13,7 @@ Columns: id · behaviour · priority · test · status.
 |---|---|---|---|---|
 | RT-1a | A worker listens on every configured IPv4 and IPv6 address and accepts connections | v1 | `listen_test` | design |
 | RT-1b | N workers on one port share new connections: with 4 workers and 400 connections, each worker gets at least 50 | v1 | `listen_test` | design |
-| RT-1c | `check(cfg)` rejects: duplicate listener ids, a route to an unknown listener, `Sni` rows on a listener without `inspect: Sni`, empty targets; each with a message naming the field | v1 | `config_test` | red (awaiting approval) |
+| RT-1c | `check(cfg)` rejects: duplicate listener ids, a route to an unknown listener, `Sni` rows on a listener without `inspect: Sni`, empty targets; each with a message naming the field | v1 | `config_test` | green |
 | RT-1d | Starting while another process holds the port fails with an error naming the address, instead of silently sharing it | v1 | `listen_test` | design |
 | RT-1e | `worker()` and `serve()` never call `abort` or `exit` for anything a peer or the OS does (resets, EMFILE, ENOBUFS); they count and continue | v1 | `chaos_test` | design |
 

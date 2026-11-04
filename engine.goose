@@ -115,9 +115,3 @@ fn post(m: Message) {}
 // Blocks the calling thread until SIGTERM or SIGINT, then drains every worker with a deadline
 // (RT-8c). Call it from main, after spawn.
 fn wait_for_signal_then_drain(deadline_ms: i64) {}
-
-// --- checking a config --------------------------------------------------------------------------
-
-// Appends one line per problem, naming the field, to `problems`; returns true when there is none
-// (RT-1c). Never aborts.
-fn check(cfg: Config, problems: u8[>..]&) -> bool { return true; }
