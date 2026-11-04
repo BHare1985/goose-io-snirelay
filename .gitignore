@@ -14,3 +14,5 @@ tests/unit/*
 tests/net/*
 !tests/net/*.*
 !tests/net/
+__pycache__/
+*.pyc
