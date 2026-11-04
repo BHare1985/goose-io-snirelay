@@ -63,5 +63,21 @@ Method: `bench/syscalls.py` (strace -c -f, 4 s of wrk) for counts; `bench/run_m6
 | read -> write loop until a short read, at most 64 KB per wakeup (`_WAKEUP_BUDGET`) | 1 MiB: epoll_wait 4.4 -> 1.4 per request (C: 0.2); total 87 -> 83 |
 | TCP_NODELAY set once on the listener (accepted sockets inherit it); no `shutdown` when both directions have ended and the close follows | new connection: 21.5 -> 19.5 syscalls (C: 15.4) |
 
-Throughput after (req/s, goose vs epoll_copy, median of 3): 16 KiB 42.4k vs 42.5k (99.6%); 64 KiB 16.5k vs 16.2k; 1 MiB 1,356 vs 1,409 (96%); web mix 30.1k vs 30.8k (98%); 11 B keep-alive 56.4k vs 57.1k (99%); 11 B new connection per request 8,720 vs 10,480 (83%).
-New connection per request: both proxies spend ~4.8 of 5 CPU seconds in the kernel (user time 0.15 s vs 0.12 s), so the gap is syscall count: 19.5 vs 15.4 per request. The four extra are the cost of semantics the C copy engine does not have: half-close (one more `recv` to see the second EOF, one `epoll_ctl(MOD)` to stop reading the source that ended) and not reading the client while connecting (`ADD` with no interest, then two `MOD`s once connected).
+Delayed client registration (client joins epoll when the connect finishes, 4th change): new connection 19.5 -> 18.5 syscalls (C: 15.4). All 21 test files unchanged.
+
+### Before and after, same method (bench/run_m6.sh, full: 8 s, 3 rounds, 1 worker, medians of 3; after = bench/results/20261104-212103)
+
+| row | goose before | goose after | epoll_copy | before | after |
+|---|---|---|---|---|---|
+| 11 B keep-alive | see run 20261104-202822 | 49,865 | 51,336 | | 97.1% |
+| 11 B new connection per request | | 8,805 | 10,533 | 81% | 83.6% |
+| 16 KiB | | 42,269 | 42,576 | 63.5% | 99.3% |
+| 64 KiB | | 16,589 | 16,273 | 63-69% | 101.9% |
+| 1 MiB | | 1,347 | 1,424 | 63-69% | 94.6% |
+| web mix | | 30,355 | 30,862 | 81% | 98.4% |
+
+NOT parity on two rows: 1 MiB (94.6%) and new connection per request (83.6%). Run-to-run noise on this host is about +-3%.
+
+New connection per request: both proxies spend ~4.8 of 5 CPU seconds in the kernel (user 0.15 s vs 0.12 s), so the gap is syscalls: 18.5 vs 15.4 per request.
+Earlier I attributed the difference to half-close semantics. That was wrong: the C proxy passes the same half-close scenarios as RT-4b (client half-close with a 2 MB reply, backend half-close then 2 MB back; both `epoll_copy` and `-v`, checked 2026-11-04 with a standalone script), so half-close is not what costs the syscalls.
+The real difference is the engine design: the C proxy registers each socket once with `EPOLLIN|EPOLLOUT|EPOLLRDHUP|EPOLLET` and tracks readiness in flags, so it makes 2 `epoll_ctl` per connection and none on the data path. Ours is level-triggered and changes interest (4 `epoll_ctl`: ADD, ADD, MOD to start reading the server, MOD to stop at EOF) and does one more `recv` (EOF of the second side). Closing that gap means moving to edge-triggered readiness, a redesign of backpressure (RT-5c/5d), not a tuning change.
