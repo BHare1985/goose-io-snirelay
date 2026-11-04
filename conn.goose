@@ -49,7 +49,9 @@ struct _ConnectionSlot {
     server_mask: u32,
     listener: u16,
     user: u32,
-    started_ms: i64,             // when the connection was accepted (inspect timeout)
+    started_ms: i64,             // when the connection was accepted, or the current connect attempt began (their timeouts)
+    last_active_ms: i64,         // when bytes last moved in either direction (idle and half-close timeouts)
+    half_closed_at_ms: i64,      // when the first direction ended, or 0
     inspect_seen: i32,           // bytes of the hello seen at the last peek
     rcvlowat_raised: bool,       // SO_RCVLOWAT was raised while waiting for a short hello; put back before forwarding
     route_index: u16,            // the route the connection took (an index into cfg.routes)
@@ -290,10 +292,10 @@ fn _reject_connection(w: Worker&, fd: i32, reason: CloseReason) {
     w._stats.closed[_close_reason_index(reason)]++;
 }
 
-fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool) -> _ConnectionSlot {
+fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool, now: i64) -> _ConnectionSlot {
     return _ConnectionSlot {
         gen: gen, live: true, state: if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING }, client_fd: fd, server_fd: -1,
-        client_mask: if inspect { c_EPOLLIN } else { 0 }, server_mask: 0, listener: listener, user: 0, started_ms: c_boottime_ms(),
+        client_mask: if inspect { c_EPOLLIN } else { 0 }, server_mask: 0, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
         inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tag: 0, override_target: -1,
         out_buffers: [-1; 4], out_lengths: [0; 4], out_count: 0, out_pos: 0, consumed: false, paused: false,
         data_pending: false, want_writable: false, closing: false, closing_reason: CloseReason.PeerClosed,
@@ -312,10 +314,10 @@ fn _new_connection(w: Worker&, li: i64, fd: i32) {
     if w._free_slots.len > 0 {
         i = w._free_slots.pop();
         gen = w._connection_slots[i].gen;
-        w._connection_slots[i] = _fresh_slot(gen, fd, w.cfg.listeners[li].id, inspect);
+        w._connection_slots[i] = _fresh_slot(gen, fd, w.cfg.listeners[li].id, inspect, w._now_ms);
     } else {
         i = w._connection_slots.len;
-        w._connection_slots.push(_fresh_slot(gen, fd, w.cfg.listeners[li].id, inspect));
+        w._connection_slots.push(_fresh_slot(gen, fd, w.cfg.listeners[li].id, inspect, w._now_ms));
     }
     let s .= w._connection_slots[i];
     w._stats.open++;
@@ -366,14 +368,24 @@ fn _inspect_connection(w: Worker&, i: i64) {
     _route_and_connect(w, i, hello);
 }
 
-// Closes the connections that have waited too long for their ClientHello. Called every 250 ms (design/03 section 5);
-// there is no timer per connection.
+// One pass over the slot table, every 250 ms (design/03 section 5): there is no timer per connection. It gives up on
+// a hello that is too slow (inspect), on a connect that does not complete (then tries the next address), on a
+// connection with no bytes either way (idle) and on one left half-open (half-close). A byte in the direction still open
+// restarts the half-close clock.
 fn _sweep_timeouts(w: Worker&, now: i64) {
-    let inspect_limit = w.cfg.limits.inspect_timeout_ms;
+    let limits = w.cfg.limits;
     for i in w._connection_slots.len {
         let s .= w._connection_slots[i];
-        if s.live && s.state == _STATE_INSPECTING && now - s.started_ms >= inspect_limit {
-            _close_connection(w, i, CloseReason.InspectTimeout);
+        if !s.live { continue; }
+        if s.state == _STATE_INSPECTING {
+            if now - s.started_ms >= limits.inspect_timeout_ms { _close_connection(w, i, CloseReason.InspectTimeout); }
+        } else if s.state == _STATE_CONNECTING {
+            if s.server_fd >= 0 && now - s.started_ms >= limits.connect_timeout_ms { _connect_failed(w, i); }
+        } else if s.half_closed_at_ms != 0 {
+            let since = if s.last_active_ms > s.half_closed_at_ms { s.last_active_ms } else { s.half_closed_at_ms };
+            if now - since >= limits.half_close_timeout_ms { _close_connection(w, i, CloseReason.HalfCloseTimeout); }
+        } else if now - s.last_active_ms >= limits.idle_timeout_ms {
+            _close_connection(w, i, CloseReason.IdleTimeout);
         }
     }
 }
@@ -463,6 +475,7 @@ fn _attempt_connect(w: Worker&, i: i64) {
         if s.attempts >= count { _close_connection(w, i, CloseReason.ConnectFailed); return; }
         let index = (s.first_target + s.attempts) % count;
         s.attempts++;
+        s.started_ms = w._now_ms;                          // the connect timeout runs from here
         var p = _ParsedAddress { false, [0; 16], 0 };
         var sfd: i32 = -1;
         if _parse_address(target.addrs[index].text, p) { sfd = c_connect_start(p.v6, p.ip, p.port); }
@@ -476,17 +489,19 @@ fn _attempt_connect(w: Worker&, i: i64) {
     }
 }
 
+// The attempt failed (refused, or timed out): count it and try the next address, or close when none is left.
+fn _connect_failed(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    c_close(s.server_fd);                                  // closing removes it from epoll
+    s.server_fd = -1;
+    s.server_mask = 0;
+    _count_connect_failure(w, s.attempts, _target_of(w, s).addrs.len);
+    _attempt_connect(w, i);
+}
+
 fn _connect_finished(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
-    let err = c_connect_result(s.server_fd);
-    if err != 0 {
-        c_close(s.server_fd);                              // closing removes it from epoll
-        s.server_fd = -1;
-        s.server_mask = 0;
-        _count_connect_failure(w, s.attempts, _target_of(w, s).addrs.len);
-        _attempt_connect(w, i);                            // the next address, or close
-        return;
-    }
+    if c_connect_result(s.server_fd) != 0 { _connect_failed(w, i); return; }
     s.state = _STATE_FORWARDING;
     _update_epoll_interest(w, i);
 }
@@ -517,6 +532,7 @@ fn _read_direction(w: Worker&, i: i64, up: bool) {
     if n > 0 {
         dir.len = n as i32;
         dir.pos = 0;
+        s.last_active_ms = w._now_ms;
         _flush_direction(w, i, up);
         return;
     }
@@ -528,6 +544,7 @@ fn _read_direction(w: Worker&, i: i64, up: bool) {
     _give_back_buffer(w, held);
     if n == 0 {                                           // the source ended: tell the destination, stop reading
         dir.eof = true;
+        if s.half_closed_at_ms == 0 { s.half_closed_at_ms = w._now_ms; }
         c_shutdown_wr(dst);
         dir.shut = true;
         _finish_or_update_interest(w, i);
@@ -552,6 +569,7 @@ fn _flush_direction(w: Worker&, i: i64, up: bool) {
         let n = c_send(dst, rest[0], rest.len);
         if n > 0 {
             dir.pos += n as i32;
+            s.last_active_ms = w._now_ms;
             if up { w._stats.bytes_in += n; } else { w._stats.bytes_out += n; }
         } else if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) {
             _update_epoll_interest(w, i);                     // wait for EPOLLOUT

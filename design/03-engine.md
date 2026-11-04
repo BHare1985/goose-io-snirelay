@@ -202,3 +202,14 @@ benchmarks, so tcprouter does not carry a second engine.
   to the forwarding path; the handler's ownership ends there and no Closed event follows.
 - **Measured:** 100,000 keep-alive requests from 100 clients in 2.4 s (client-bound: Python); 50 Ticks in 5 s with the largest gap
   101 ms under 50 busy connections; a 64 MB send to a client that reads nothing for 2 s grew the server's RSS by 164 kB.
+
+## 14. As built: timeouts (M4 group A)
+
+- Each slot has `started_ms` (accept, or the start of the current connect attempt), `last_active_ms` (bytes moved in either
+  direction, stamped from the loop's own clock reading, `_now_ms`, so no extra syscall per read) and `half_closed_at_ms`.
+- One sweep every 250 ms walks the slot table: inspect (`InspectTimeout`), connect (the attempt is failed and the next address is
+  tried, so a timed-out connect is retried exactly like a refused one: RT-4c), idle (`IdleTimeout`) and half-open
+  (`HalfCloseTimeout`, measured from the later of the first EOF and the last byte, so data in the direction still open keeps it
+  alive). Handler connections are covered by the idle rule.
+- Measured, limit / closed at: connect 0.5 s / 0.60 s, idle 1.0 s / 1.20 s, half-close 1.0 s / 1.00-1.10 s: every one in limit
+  to limit + 250 ms, the sweep period.

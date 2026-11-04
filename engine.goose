@@ -82,6 +82,7 @@ root struct Worker {
     _pending: _PendingEvent[>..] = [],           // handler events queued during a batch, drained by serve (handler.goose)
     _pending_head: i64 = 0,
     _override_targets: Target[>..] = [],         // targets given to forward(); a free entry has no addresses
+    _now_ms: i64 = 0,                            // CLOCK_BOOTTIME at the start of the current pass of the loop
     _listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
 }
 
@@ -121,13 +122,14 @@ fn serve<F>(w: Worker&) {
     var last_sweep: i64 = 0;
     loop {
         let n = c_epoll_wait(w._epoll_fd, events[0], 256, 100);
+        w._now_ms = c_boottime_ms();
         if n < 0 {
             _pause_milliseconds(1);                     // an unexpected epoll error: do not spin
         } else {
             for k in n { _dispatch_event(w, events[k].data, events[k].events); }
         }
         _deliver_events(w, F);
-        let now = c_boottime_ms();
+        let now = w._now_ms;
         _resume_paused_listeners(w, now);
         if now - last_sweep >= 250 {
             last_sweep = now;

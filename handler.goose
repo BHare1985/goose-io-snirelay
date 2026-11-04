@@ -46,6 +46,7 @@ fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool {
         offset += n;
     }
     s.consumed = true;
+    s.last_active_ms = w._now_ms;
     _flush_output(w, i);
     return true;
 }
@@ -205,6 +206,7 @@ fn _read_for_handler(w: Worker&, i: i64) {
     let n = c_recv(s.client_fd, buffer[0], buffer.len);
     if n > 0 {
         s.up.buf = b;
+        s.last_active_ms = w._now_ms;
         s.data_pending = true;
         s.consumed = true;
         w._stats.bytes_in += n;

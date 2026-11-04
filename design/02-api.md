@@ -160,6 +160,10 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool        // hand the conn to t
   exactly one `Writable` once there is room). A server that ignores `false` loses data only on that connection, never
   memory (RT-5e). `examples/http_hello.goose` sends a small response in one call and says where to look for larger ones;
   `tests/net/harness/handler_server.goose` (tags 2 and 3) shows the loop.
+- **Handler connections have the idle timeout too.** A connection with no bytes in either direction for
+  `limits.idle_timeout_ms` is closed (`Closed` with `IdleTimeout`). A handler server cannot keep a quiet keep-alive connection
+  open beyond that, and that is intended: set `idle_timeout_ms` to how long a client may stay silent, or have the client send
+  something. Bytes you `send` count as activity as well as bytes received.
 - **`forward` ends your ownership.** When it returns true no `Closed` event follows for that connection: **free your
   per-connection state when `forward` returns true** (handler_server tag 4 does exactly that). It returns false, and does
   nothing, once a byte has been read for the handler or sent.
