@@ -47,7 +47,7 @@
 
 | In | Notes |
 |---|---|
-| Linux, 64-bit | No other OS in v1 |
+| Linux, 64-bit: x86-64 and arm64 | No other OS in v1. epoll, clock and signalfd go through a small C header adapter, because `epoll_event` is packed only on x86-64 (Brian) |
 | TCP listeners, IPv4 and IPv6, one per worker with `SO_REUSEPORT` | Port-in-use check, RT-1d |
 | One event loop per worker thread, epoll, share-nothing | io_uring later behind the same internals |
 | Routing by listener, by exact or wildcard SNI, and a default | Parser in doc 04 |

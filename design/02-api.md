@@ -4,6 +4,10 @@ The code below is the **shape** of the API, written as Goose as far as we know i
 nobody has compiled is marked `// [verify]`; Brian fixes syntax freely, but a change to the
 *shape* (what the caller writes, who owns what, when a call may block) goes back to Charlie.
 
+**Syntax note (Brian, 2026-11-04, [V]):** enum payloads are struct-like (`Sni { name: … }`), read
+with `match ev { Opened o => o.slot, … }`; there is no `switch`, `while let` or `or die`. The
+examples below still use the older notation until Brian rewrites them during M0; the shape stands.
+
 ## 1. Three Goose facts that decide the shape
 
 1. **No stored callbacks.** Function values are compile-time only; a block passed to a function
@@ -119,14 +123,20 @@ struct Conn { slot: u32, gen: u32 }           // a handle: valid until Closed; s
 fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool   // queues; false if the conn is gone or its
                                                            // queue is full (then wait for Writable)
 fn close(w: Worker&, c: Conn)                              // after queued bytes are sent
-fn abort(w: Worker&, c: Conn)                              // now, with RST
+fn reset(w: Worker&, c: Conn)                              // now, with RST (not `abort`: that name
+                                                           // would hide Goose's builtin inside the namespace)
+fn set_user(w: Worker&, c: Conn, user: u32)                // your own id for this conn, returned in every event
+fn user(w: Worker&, c: Conn) -> u32
 fn pause_reading(w: Worker&, c: Conn, paused: bool)        // your own backpressure
 fn forward(w: Worker&, c: Conn, to: Target)                // hand the conn to the engine's forwarding
                                                            // (only before you consumed any bytes)
 ```
 
-- **Your per-connection state** lives in your own `slot_pool`, indexed by `c.slot`; check
-  `c.gen` to reject a reused slot. tcprouter never stores your state.
+- **Your per-connection state** lives in your own `slot_pool`. On `Opened`, allocate from it and
+  `set_user(w, c, index)`; every later event carries that `user` (decided 2026-11-04 after Brian's
+  review: a `slot_pool` picks its own index, so the engine's `c.slot` can't key yours).
+  tcprouter never stores your state, only the u32. Per-connection growable state can't be a pool
+  element (resizable elements are rejected [V Brian]): use `u8[..N]` or a `slice_pool` run.
 - **Output is buffered by the engine** up to a per-connection cap (`limits.buffer_size × 4`);
   `send` returns false at the cap and you get `Writable` when it drains. A server that ignores
   `false` loses data only on that connection, never memory (RT-5e).
