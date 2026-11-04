@@ -1,0 +1,3 @@
+// Header-only native part: static inline adapters, compiled into the program's own C unit.
+c_headers = ["src/adapters.h"];
+exclude = ["tests", "examples"];

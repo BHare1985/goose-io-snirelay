@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Wrapper: the Goose compiler built from upstream/goose (see GOOSE_MASTER_GUIDE.md "Version").
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export GOOSE_STDLIB="$HERE/upstream/goose/stdlib"
+exec "$HERE/upstream/build/goose" "$@"

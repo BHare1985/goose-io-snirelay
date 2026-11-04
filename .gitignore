@@ -1,0 +1,10 @@
+goose-kb/upstream/
+goose-kb/**/*.o
+# built test binaries (no extension) are ignored by listing the sources instead of the binaries:
+goose-kb/GOOSE_TEST_PROGRAMS/t0[0-9]_*
+!goose-kb/GOOSE_TEST_PROGRAMS/t0[0-9]_*.*
+goose-kb/GOOSE_TEST_PROGRAMS/m0/*
+!goose-kb/GOOSE_TEST_PROGRAMS/m0/*.*
+goose-kb/GOOSE_TEST_PROGRAMS/pkg_c_headers/app
+goose-kb/GOOSE_TEST_PROGRAMS/pkg_c_sources/app
+goose-kb/GOOSE_TEST_PROGRAMS/pkg_c_sources/cpkg/tests/t

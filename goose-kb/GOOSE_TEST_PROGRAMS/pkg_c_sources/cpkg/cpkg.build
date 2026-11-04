@@ -1,0 +1,5 @@
+c_sources = ["src/cpkg.c"];
+c_include = ["src"];
+c_flags_cc = ["-O2"];
+c_libs = ["m"];
+exclude = ["tests"];
