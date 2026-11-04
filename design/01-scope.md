@@ -47,7 +47,7 @@
 
 | In | Notes |
 |---|---|
-| Linux, 64-bit: x86-64 and arm64 | No other OS in v1. epoll and the clock go through one small C file (signalfd needs none [V]) (`src/c_sys.c`, `c_sources`), because `epoll_event` is packed only on x86-64 (Brian). A `c_headers` adapter would not work under `goose run`: TinyCC cannot find system headers [V] |
+| Linux, 64-bit: x86-64 and arm64 | No other OS in v1. epoll and the clock go through one small C file (`src/c_sys.c`, via `c_sources`; it also holds signalfd), because `epoll_event` is packed only on x86-64 (Brian). A `c_headers` adapter would not work under `goose run`: TinyCC cannot find system headers [V] |
 | TCP listeners, IPv4 and IPv6, one per worker with `SO_REUSEPORT` | Port-in-use check, RT-1d |
 | One event loop per worker thread, epoll, share-nothing | epoll only (user, 2026-11-04: io_uring showed little gain in the C proxy) |
 | Routing by listener, by exact or wildcard SNI, and a default | Parser in doc 04 |

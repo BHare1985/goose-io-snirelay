@@ -34,8 +34,8 @@ burst of traffic (RT-6b). The C proxy learned this the hard way (463f670).
 ```goose
 struct Conn { slot: u32, gen: u32 }                    // public handle (doc 02)
 
-struct c_Slot {                                       // one per connection, in a table inside the Worker root
-                                                       // (a root cannot contain a slot_pool [V M0]); internal names start with `c_`
+struct router_ConnectionSlot {                                       // one per connection, in a table inside the Worker root
+                                                       // (a root cannot contain a slot_pool [V M0]); internal names start with `router_`
     gen: u32,                  // bumped on free; a handle or event with an old gen is ignored
     state: State,              // Inspecting, Connecting, Forwarding, Handling, Closing
     client: Side,
@@ -133,7 +133,7 @@ benchmarks, so tcprouter does not carry a second engine.
 
 - **Level-triggered epoll.** Interest is derived from state, never remembered: a source is read only when its
   direction has no unwritten bytes, is not at EOF and is not waiting for a buffer; a destination is watched for
-  writability only while bytes are pending. `c_update_interest` recomputes both masks after every change.
+  writability only while bytes are pending. `router_update_epoll_interest` recomputes both masks after every change.
 - **The pool grows lazily**, one buffer at a time up to `buffers_per_worker`, by appending to a growable array.
   An idle worker touches no buffer memory (RSS 4.7 MB at start). Growth never moves existing memory, so a buffer the
   kernel is writing into stays put (design/09 O-3, verified).

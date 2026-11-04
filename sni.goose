@@ -9,7 +9,7 @@
 //   * the C proxy returns a route index; this returns a Hello, and matching is a separate step;
 //   * the C proxy closes a client whose first byte is not a TLS handshake; here that is NotTls, so
 //     a plain-TCP client is routed by NoSni/Any (RT-3g);
-//   * the C proxy accepts any bytes as a name; here a name is checked (see c_host_name).
+//   * the C proxy accepts any bytes as a name; here a name is checked (see router_parse_host_name).
 namespace tcprouter;
 
 import binary;
@@ -61,9 +61,9 @@ fn parse_hello(bytes: const u8[:], scratch: u8[:]) -> Hello {
         // The common case: the whole handshake message is in the first record. Parse it in place.
         if at == 0 && payload.len >= 4 {
             if payload[0] != HS_CLIENT_HELLO { return Hello.Invalid; }
-            let message = c_message_length(payload);
+            let message = router_handshake_message_length(payload);
             if message > MAX_HELLO { return Hello.Invalid; }
-            if message <= payload.len { return c_parse_body(payload[4..message]); }
+            if message <= payload.len { return router_parse_client_hello_body(payload[4..message]); }
         }
 
         // Otherwise the message continues in the next record: collect the payloads in scratch.
@@ -74,23 +74,23 @@ fn parse_hello(bytes: const u8[:], scratch: u8[:]) -> Hello {
 
         if held >= 1 && scratch[0] != HS_CLIENT_HELLO { return Hello.Invalid; }
         if held >= 4 {
-            let message = c_message_length(scratch[..held]);
+            let message = router_handshake_message_length(scratch[..held]);
             if message > MAX_HELLO { return Hello.Invalid; }
-            if held >= message { return c_parse_body(scratch[4..message]); }
+            if held >= message { return router_parse_client_hello_body(scratch[4..message]); }
         }
     }
 }
 
 // Internal: the length of the whole handshake message (4-byte header + 24-bit body length).
 // `head` holds at least the 4 header bytes.
-fn c_message_length(head: const u8[:]) -> i64 {
+fn router_handshake_message_length(head: const u8[:]) -> i64 {
     return 4 + ((head[1] as i64) << 16 | (head[2] as i64) << 8 | head[3]);
 }
 
 // Internal: the ClientHello body (RFC 8446 section 4.1.2):
 //   legacy_version(2) random(32) session_id<1> cipher_suites<2> compression_methods<1> extensions<2>
 // Every read is checked: a length that runs past the body is Invalid, never a read past it.
-fn c_parse_body(body: const u8[:]) -> Hello {
+fn router_parse_client_hello_body(body: const u8[:]) -> Hello {
     var r = binary::reader(body);
     if !binary::skip(r, 2 + 32) { return Hello.Invalid; }
 
@@ -113,14 +113,14 @@ fn c_parse_body(body: const u8[:]) -> Hello {
         let len, ok_l = binary::read_u16be(exts);
         var ext, ok_d = binary::subreader(exts, len);
         if !ok_k || !ok_l || !ok_d { return Hello.Invalid; }
-        if kind == EXT_SERVER_NAME { return c_server_name_list(ext); }
+        if kind == EXT_SERVER_NAME { return router_parse_server_name_list(ext); }
     }
     return Hello.NoSni;
 }
 
 // Internal: the body of a server_name extension (RFC 6066 section 3): list<2> { name_type(1) name<2> }.
 // The first host_name entry wins; entries of other types are skipped.
-fn c_server_name_list(ext: binary::Reader&) -> Hello {
+fn router_parse_server_name_list(ext: binary::Reader&) -> Hello {
     let list_len, ok_n = binary::read_u16be(ext);
     var list, ok_l = binary::subreader(ext, list_len);
     if !ok_n || !ok_l { return Hello.Invalid; }
@@ -130,14 +130,14 @@ fn c_server_name_list(ext: binary::Reader&) -> Hello {
         let name_len, ok_w = binary::read_u16be(list);
         let name, ok_b = binary::read_bytes(list, name_len);
         if !ok_t || !ok_w || !ok_b { return Hello.Invalid; }
-        if name_type == NAME_TYPE_HOST { return c_host_name(name); }
+        if name_type == NAME_TYPE_HOST { return router_parse_host_name(name); }
     }
     return Hello.NoSni;
 }
 
 // Internal: the rules for the name itself (design/04-sni.md): ASCII letters, digits, '.' and '-'
 // only; lowercased; one trailing dot dropped; at most 253 bytes; an empty name is NoSni.
-fn c_host_name(raw: const u8[:]) -> Hello {
+fn router_parse_host_name(raw: const u8[:]) -> Hello {
     if raw.len == 0 { return Hello.NoSni; }
     var name = raw;
     if name[name.len - 1] == '.' { name = name[..name.len - 1]; }

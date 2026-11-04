@@ -15,15 +15,15 @@ fn check(ok: bool, what: const u8[:]) {
 }
 
 fn v4(text: const u8[:], a: u8, b: u8, c: u8, d: u8, port: u16) -> bool {
-    var p = tcprouter::c_Parsed { false, [0; 16], 0 };
-    let ok = tcprouter::c_parse_addr(text, p);
+    var p = tcprouter::router_ParsedAddress { false, [0; 16], 0 };
+    let ok = tcprouter::router_parse_address(text, p);
     return ok && !p.v6 && p.ip[0] == a && p.ip[1] == b && p.ip[2] == c && p.ip[3] == d && p.port == port;
 }
 
 // The 16 bytes of an IPv6 address given as eight 16-bit groups.
 fn v6(text: const u8[:], g: u16[8], port: u16) -> bool {
-    var p = tcprouter::c_Parsed { false, [0; 16], 0 };
-    let ok = tcprouter::c_parse_addr(text, p);
+    var p = tcprouter::router_ParsedAddress { false, [0; 16], 0 };
+    let ok = tcprouter::router_parse_address(text, p);
     if !ok || !p.v6 || p.port != port { return false; }
     for i in 8 {
         if p.ip[i * 2] != (g[i] >> 8) as u8 || p.ip[i * 2 + 1] != (g[i] & 0xff) as u8 { return false; }
@@ -32,8 +32,8 @@ fn v6(text: const u8[:], g: u16[8], port: u16) -> bool {
 }
 
 fn rejected(text: const u8[:]) -> bool {
-    var p = tcprouter::c_Parsed { false, [0; 16], 0 };
-    return !tcprouter::c_parse_addr(text, p);
+    var p = tcprouter::router_ParsedAddress { false, [0; 16], 0 };
+    return !tcprouter::router_parse_address(text, p);
 }
 
 fn main() {

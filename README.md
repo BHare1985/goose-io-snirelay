@@ -23,13 +23,14 @@ one small C file (`src/c_sys.c`).
 
 ## Conventions for people reading or extending the code
 
-Goose has no privacy and no nested namespaces, so the rule is by name, and it does not change:
+Goose has no privacy and no nested namespaces: every declaration in a package is public. So that a reader can
+tell the API from the machinery at a glance, internal names carry a prefix, and the rule does not change:
 
 | Name looks like | Meaning |
 |---|---|
 | `parse_hello`, `Config`, `Worker`, `Event`, `serve` | **Public API.** Documented in design/02 and covered by tests. |
-| `c_parse_body`, `c_Slot`, `c_slots` | **Internal.** Starts with `c_`. May change or vanish in any release; do not use. |
-| `c_listen`, `c_recv`, `c_EPOLLIN` | **Internal.** The libc and C-layer bindings (`sys.goose`, `src/c_sys.c`) follow the same `c_` rule: one rule, no second namespace. |
+| `router_close_connection`, `router_ConnectionSlot`, `ROUTER_STATE_FORWARDING` | **Internal.** Starts with `router_` (`ROUTER_` for constants), and is spelled out in full. May change or vanish in any release; do not use. |
+| `c_listen`, `c_epoll_wait` | **The C functions in `src/c_sys.c`, and only those.** Goose never uses a `c_` name: `sys.goose` binds each one under a `router_` name (`router_socket_listen = "c_listen"`). |
 
 Every file declares `namespace tcprouter;`.
 Library code never reads files, environment variables or flags, never calls `abort` or `exit` because of
