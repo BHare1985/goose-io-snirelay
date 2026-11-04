@@ -49,7 +49,10 @@ fn check(cfg: const Config&, problems: u8[>..]&) -> bool {
         }
 
         match r.action {
-            Forward f => { _check_target(problems, i, f.to); },
+            Forward f => {
+                if f.to >= cfg.targets.len { format(problems, "routes[", i, "].action: target ", f.to, " is not in Config.targets\n"); }
+                else { _check_target(problems, i, cfg.targets[f.to as i64]); }
+            },
             _ => {},
         }
     }
@@ -66,7 +69,7 @@ fn _check_sni_listener(problems: u8[>..]&, cfg: const Config&, route: i64, liste
 
 fn _check_address(problems: u8[>..]&, path: const u8[:], a: Addr) {
     if a.too_long {
-        format(problems, path, ": address text is longer than 64 bytes\n");
+        format(problems, path, ": address text is longer than 48 bytes\n");
         return;
     }
     var parsed = _ParsedAddress { false, [0; 16], 0 };
@@ -82,7 +85,7 @@ fn _check_target(problems: u8[>..]&, route: i64, t: Target) {
     for k in t.addrs.len {
         var parsed = _ParsedAddress { false, [0; 16], 0 };
         if t.addrs[k].too_long {
-            format(problems, path, ": target address ", k, " is longer than 64 bytes\n");
+            format(problems, path, ": target address ", k, " is longer than 48 bytes\n");
         } else if !_parse_address(t.addrs[k].text, parsed) {
             format(problems, path, ": bad target address ", k, " '", t.addrs[k].text, "'\n");
         }

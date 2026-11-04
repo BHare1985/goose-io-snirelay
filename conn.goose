@@ -420,7 +420,12 @@ fn _route_and_connect(w: Worker&, i: i64, hello: Hello) {
     var handle = false;
     var tag: u16 = 0;
     match route.action {
-        Forward f => { count = f.to.addrs.len; tag = f.to.tag; s.target_gen = f.to.gen; },
+        Forward f => {
+            if f.to < w.cfg.targets.len {
+                let t .= w.cfg.targets[f.to as i64];
+                count = t.addrs.len; tag = t.tag; s.target_gen = t.gen;
+            }
+        },
         Handle h => { handle = true; tag = h.tag; },
         _ => {},
     }
@@ -468,7 +473,7 @@ fn _target_of(w: Worker&, s: _ConnectionSlot&) -> Target {
     if s.override_target >= 0 { return w._override_targets[s.override_target]; }
     var target = Target { addrs: [] };
     match w.cfg.routes[s.route_index as i64].action {
-        Forward f => { target = f.to; },
+        Forward f => { if f.to < w.cfg.targets.len { target = w.cfg.targets[f.to as i64]; } },
         _ => {},
     }
     return target;

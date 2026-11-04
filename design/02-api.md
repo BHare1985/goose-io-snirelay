@@ -28,13 +28,14 @@ and read with `match ev { Opened o => o.conn, … }`; there is no `switch`, `whi
 
 Plain data. Build it by hand or from a file, `check()` it, pass the same value to every worker.
 It is flat (no references), so it travels as a `thread_fn` argument: a config with 256 routes is
-about 66 KB and copies fine [V m0/o24].
+about 95 KB (it was 205 KB before routes pointed at a shared target table) and copies fine [V m0/o24]; a worker process holds a few copies of it, so its size is idle memory.
 
 ```goose
-struct Addr { text: u8[..64] }          // "0.0.0.0:443", "[::]:8080"; parsed at start(), checked by check()
+struct Addr { text: u8[..48] }          // "0.0.0.0:443", "[::]:8080"; parsed at start(), checked by check(); 47 bytes is the longest valid text
 fn addr(text: const u8[:]) -> Addr
 struct Target { addrs: Addr[..8] }      // tried in order, first choice rotating (built-in policy)
 fn target(names: const u8[:][:]) -> Target
+fn add_target(cfg: Config&, t: Target) -> u16    // puts a target in Config.targets (64 at most) and returns its index for Forward { to }
 
 enum Inspect { None, Sni }              // None: route by listener only. Sni: read the ClientHello first
 struct Listener { id: u16, addr: Addr, inspect: Inspect = Inspect.None }
@@ -46,7 +47,7 @@ enum Match {
     NoSni,                              // a ClientHello without server_name, or not TLS at all
 }
 enum Action {
-    Forward { to: Target },             // the engine connects and copies bytes both ways
+    Forward { to: u16 },                // an index into Config.targets: the engine connects and copies bytes both ways
     Handle { tag: u16 },                // your serve block gets the events, with this tag
     Close,                              // close at once
 }
@@ -57,7 +58,7 @@ struct Limits {
     half_close_timeout_ms: i64 = 30000,   inspect_timeout_ms: i64 = 5000,
     max_conns_per_worker: i64 = 65536,    buffer_size: i64 = 32768,    buffers_per_worker: i64 = 4096,
 }
-struct Config { listeners: Listener[..16], routes: Route[..256], limits: Limits = Limits { .. } }
+struct Config { listeners: Listener[..16], routes: Route[..256], targets: Target[..64], limits: Limits = Limits { .. }, fenced_tags: u16[..16] }
 
 fn sni_route(listener: u16, name: const u8[:], action: Action) -> Route    // table-like constructors
 fn any_route(listener: u16, action: Action) -> Route
@@ -97,9 +98,8 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
 fn main() {
     var cfg = tcprouter::Config { .. };
     cfg.listeners.push(tcprouter::Listener { id: 1, addr: tcprouter::addr("0.0.0.0:5432") });
-    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward {
-        to: tcprouter::target(["10.0.0.5:5432", "10.0.0.6:5432"]),
-    }));
+    let db = tcprouter::add_target(cfg, tcprouter::target(["10.0.0.5:5432", "10.0.0.6:5432"]));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: db }));
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { print(problems); exit(2); }
 

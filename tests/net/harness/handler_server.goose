@@ -35,7 +35,7 @@ let FNV_PRIME: u64 = 1099511628211;
 // Set in main before the workers start; each worker gets a copy.
 var LOG_EVENTS: bool = false;
 var STAT_MS: i64 = 1000;
-var FORWARD_TO: u8[..64] = [];
+var FORWARD_TO: u8[..48] = [];
 
 struct Session {
     tag: u16,

@@ -16,9 +16,7 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
 fn main() {
     var cfg = tcprouter::Config { .. };
     cfg.listeners.push(tcprouter::Listener { id: 1, addr: tcprouter::addr("0.0.0.0:5432") });
-    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward {
-        to: tcprouter::target(["10.0.0.5:5432", "10.0.0.6:5432"]),
-    }));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::target(["10.0.0.5:5432", "10.0.0.6:5432"])) }));
 
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) {

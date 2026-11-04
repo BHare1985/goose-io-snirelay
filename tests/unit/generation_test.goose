@@ -26,7 +26,7 @@ extern fn close(fd: i32) -> i32;
 fn start_worker(w: tcprouter::Worker&) -> bool {
     var cfg = tcprouter::Config { .. };
     cfg.listeners.push(tcprouter::Listener { id: 1, addr: tcprouter::addr("127.0.0.1:41999") });
-    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::target(["127.0.0.1:1"]) }));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::target(["127.0.0.1:1"])) }));
     return tcprouter::start(w, cfg, 0);
 }
 

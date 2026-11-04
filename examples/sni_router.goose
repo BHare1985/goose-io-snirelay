@@ -17,13 +17,11 @@ fn main() {
         id: 1, addr: tcprouter::addr("0.0.0.0:443"), inspect: tcprouter::Inspect.Sni,
     });
     // First match wins: exact, then the longest suffix, then NoSni, then Any.
-    cfg.routes.push(tcprouter::sni_route(1, "api.example.com", tcprouter::Action.Forward {
-        to: tcprouter::target(["10.0.1.10:443", "10.0.1.11:443"]),
-    }));
+    cfg.routes.push(tcprouter::sni_route(1, "api.example.com", tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::target(["10.0.1.10:443", "10.0.1.11:443"])) }));
     var web = tcprouter::Match.SniSuffix { name: [] };
     web.name.append("example.com");
     cfg.routes.push(tcprouter::Route { listener: 1, on: web, action: tcprouter::Action.Forward {
-        to: tcprouter::target(["10.0.2.10:443"]),
+        to: tcprouter::add_target(cfg, tcprouter::target(["10.0.2.10:443"])),
     }});
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Close));    // unknown name
 

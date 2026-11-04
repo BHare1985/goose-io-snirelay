@@ -220,7 +220,7 @@ fn main() {
             if t.addrs.len == t.addrs.cap { die("too many --to (8 at most)"); }
             t.addrs.push(tcprouter::addr(target));
         }
-        cfg.routes.push(tcprouter::any_route(id, tcprouter::Action.Forward { to: t }));
+        cfg.routes.push(tcprouter::any_route(id, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, t) }));
         id++;
     }
 
@@ -234,7 +234,7 @@ fn main() {
             if t.addrs.len == t.addrs.cap { die("too many targets (8 at most)"); }
             t.addrs.push(tcprouter::addr(it));
         };
-        cfg.routes.push(tcprouter::any_route(id, tcprouter::Action.Forward { to: t }));
+        cfg.routes.push(tcprouter::any_route(id, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, t) }));
         id++;
     }
 
@@ -254,7 +254,7 @@ fn main() {
         cfg.listeners.push(tcprouter::Listener { id: id, addr: tcprouter::addr(r[..eq]) });
         var t = tcprouter::Target { addrs: [], tag: tag as u16, gen: gen as u32 };
         each_split(r[eq + 1..at], ',') { t.addrs.push(tcprouter::addr(it)); };
-        cfg.routes.push(tcprouter::any_route(id, tcprouter::Action.Forward { to: t }));
+        cfg.routes.push(tcprouter::any_route(id, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, t) }));
         id++;
     }
     for f in o.fenced {
@@ -281,7 +281,7 @@ fn main() {
             let targets = if has_name { rest[eq + 1..] } else { rest };
             var t = tcprouter::Target { addrs: [] };
             each_split(targets, ',') { t.addrs.push(tcprouter::addr(it)); };
-            let action = tcprouter::Action.Forward { to: t };
+            let action = tcprouter::Action.Forward { to: tcprouter::add_target(cfg, t) };
             if kind == "sni" { cfg.routes.push(tcprouter::sni_route(id, name, action)); }
             else if kind == "suffix" { cfg.routes.push(tcprouter::sni_suffix_route(id, name, action)); }
             else if kind == "none" { cfg.routes.push(tcprouter::Route { listener: id, on: tcprouter::Match.NoSni, action: action }); }

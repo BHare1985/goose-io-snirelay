@@ -54,6 +54,13 @@ def drain_by_command():
         # A new process on the same port gets every new connection.
         b = Server([f"127.0.0.1:{port}"], [f"127.0.0.1:{bport}"], workers=2, stat_ms=200)
         b.start().wait_ready()
+        # `accepted` comes from the stat lines, up to one period old: the probes above may have been accepted by the
+        # second worker a moment before its listener closed. Wait until both workers have reported after the listeners
+        # were seen closed (two lines each), so `before` includes every connection accepted before the drain took effect.
+        seen_lines = a.stat_lines
+        t0_wait = time.time()
+        while a.stat_lines < seen_lines + 4 and time.time() - t0_wait < 3:
+            time.sleep(0.02)
         before = a.total("accepted")
         ok = 0
         for i in range(50):

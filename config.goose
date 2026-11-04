@@ -4,8 +4,9 @@ namespace tcprouter;
 
 // A socket address as written by a person: "0.0.0.0:443", "[::]:8080", "10.0.0.5:5432". It is
 // parsed when a worker starts, so building a Config never fails; check() reports bad text.
-// `too_long` is set when the text did not fit in 64 bytes; check() reports it. Building a Config never aborts.
-struct Addr { text: u8[..64], too_long: bool = false }
+// `too_long` is set when the text did not fit in 48 bytes (the longest valid text, "[ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255]:65535", is 47); check() reports it.
+// Building a Config never aborts.
+struct Addr { text: u8[..48], too_long: bool = false }
 
 fn addr(text: const u8[:]) -> Addr {
     var a = Addr { text: [] };
@@ -24,6 +25,7 @@ fn addr(text: const u8[:]) -> Addr {
 // through this target, for deadlines and close-by-tag (messages.goose); tag 0 is untagged and is never fenced.
 struct Target { addrs: Addr[..8], too_many: bool = false, tag: u16 = 0, gen: u32 = 0 }
 
+// Targets live in Config.targets; a route names one by its index, so routes that share backends share the entry.
 fn target(names: const u8[:][:]) -> Target {
     var t = Target { addrs: [] };
     for n in names {
@@ -50,7 +52,7 @@ enum Match {
 }
 
 enum Action {
-    Forward { to: Target },            // the engine connects and copies bytes both ways
+    Forward { to: u16 },               // the engine connects and copies bytes both ways; `to` is an index into Config.targets (add_target)
     Handle { tag: u16 },               // your serve block gets the events, with this tag
     Close,                             // close at once
 }
@@ -71,8 +73,18 @@ struct Limits {
 struct Config {
     listeners: Listener[..16],
     routes: Route[..256],
+    targets: Target[..64],             // what Forward routes point at: shared, so 8 addresses are not repeated per route
     limits: Limits = Limits { .. },
     fenced_tags: u16[..16],            // tags that start with no deadline, so their connections are closed until one arrives (RT-6e)
+}
+
+// Adds a target to the table and returns its index for Action.Forward { to }. When the table is full it returns
+// _NO_TARGET, an index check() reports as unknown.
+let _NO_TARGET: u16 = 65535;
+fn add_target(cfg: Config&, t: Target) -> u16 {
+    if cfg.targets.len == cfg.targets.cap { return _NO_TARGET; }
+    cfg.targets.push(t);
+    return (cfg.targets.len - 1) as u16;
 }
 
 // Route constructors, so a config reads like a table.

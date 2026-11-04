@@ -41,9 +41,7 @@ fn good() -> tcprouter::Config {
     var cfg = tcprouter::Config { .. };
     listener(cfg, 1, "0.0.0.0:5432", tcprouter::Inspect.None);
     listener(cfg, 2, "[::]:443", tcprouter::Inspect.Sni);
-    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward {
-        to: tcprouter::target(["10.0.0.5:5432", "[2001:db8::1]:5432"]),
-    }));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::target(["10.0.0.5:5432", "[2001:db8::1]:5432"])) }));
     cfg.routes.push(tcprouter::sni_route(2, "api.example.com", tcprouter::Action.Handle { tag: 1 }));
     var suffix = tcprouter::Match.SniSuffix { name: [] };
     suffix.name.append("example.com");
@@ -119,7 +117,7 @@ fn test_sni_rows_without_inspect() {
 fn test_empty_targets() {
     var cfg = tcprouter::Config { .. };
     listener(cfg, 1, "0.0.0.0:80", tcprouter::Inspect.None);
-    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::Target { addrs: [] } }));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::Target { addrs: [] }) }));
     let r, ok = report(cfg);
     check(!ok, "RT-1c a Forward route with no target addresses fails the check");
     check(mentions(r, "routes[0].action"), "RT-1c ... naming routes[0].action");
@@ -151,18 +149,16 @@ fn test_addresses() {
               "10.0.0.1:80x", " 10.0.0.1:80", "10.0.0.1:80 ", "[zz::1]:80"] {
         check(address_names_field(a), str("C2 bad address '", a, "' is reported at listeners[0].addr"));
     }
-    // Text longer than the 64 bytes an Addr holds.
+    // Text longer than the 48 bytes an Addr holds.
     var long: u8[>..] = [];
     for i in 80 { long.push('1'); }
     long.append(":80");
-    check(address_names_field(long), "C2 an address over 64 bytes is reported, not cut short");
+    check(address_names_field(long), "C2 an address over 48 bytes is reported, not cut short");
 
     // A bad target address names the route and the target.
     var cfg = tcprouter::Config { .. };
     listener(cfg, 1, "0.0.0.0:80", tcprouter::Inspect.None);
-    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward {
-        to: tcprouter::target(["10.0.0.5:80", "not an address"]),
-    }));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::target(["10.0.0.5:80", "not an address"])) }));
     let r, ok = report(cfg);
     check(!ok && mentions(r, "routes[0].action"), "C2 a bad target address is reported at routes[0].action");
 }
@@ -175,7 +171,7 @@ fn test_all_problems() {
     listener(cfg, 1, "nonsense", tcprouter::Inspect.None);                                    // dup id + bad address
     cfg.routes.push(tcprouter::sni_route(1, "api.example.com", tcprouter::Action.Close));    // sni without inspect
     any_to_close(cfg, 8);                                                                     // unknown listener
-    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::Target { addrs: [] } }));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::Target { addrs: [] }) }));
     let r, ok = report(cfg);
     check(!ok, "RT-1c a config with five problems fails");
     check(mentions(r, "listeners[1].id"), "RT-1c all: duplicate id");
@@ -216,17 +212,38 @@ fn test_overflows() {
     var long: u8[>..] = [];
     for i in 300 { long.push('a'); }
     cfg.routes.push(tcprouter::sni_route(1, long, tcprouter::Action.Close));                         // routes[0]: name too long
-    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward {
-        to: tcprouter::target(["1.1.1.1:1", "1.1.1.2:1", "1.1.1.3:1", "1.1.1.4:1", "1.1.1.5:1",
-                               "1.1.1.6:1", "1.1.1.7:1", "1.1.1.8:1", "1.1.1.9:1"]),                // routes[1]: nine targets
-    }));
+    let nine = tcprouter::add_target(cfg, tcprouter::target(["1.1.1.1:1", "1.1.1.2:1", "1.1.1.3:1", "1.1.1.4:1", "1.1.1.5:1",
+                                                             "1.1.1.6:1", "1.1.1.7:1", "1.1.1.8:1", "1.1.1.9:1"]));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: nine }));                // routes[1]: nine targets
     let r, ok = report(cfg);
     check(!ok, "RT-1c a 300-byte route name and nine target addresses fail the check (and did not abort)");
     check(mentions(r, "routes[0].on"), "RT-1c ... the long name is reported at routes[0].on");
     check(mentions(r, "routes[1].action"), "RT-1c ... the ninth target is reported at routes[1].action");
 }
 
+// Routes share targets by index; an index that is not in the table is reported, a full table hands out an index check() rejects.
+fn test_target_table() {
+    var cfg = tcprouter::Config { .. };
+    listener(cfg, 1, "0.0.0.0:80", tcprouter::Inspect.None);
+    let shared = tcprouter::add_target(cfg, tcprouter::target(["10.0.0.5:80"]));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: shared }));
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: shared }));
+    let r, ok = report(cfg);
+    check(ok && cfg.targets.len == 1, "RT-1c two routes can share one target entry");
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: 7 }));
+    let r2, ok2 = report(cfg);
+    check(!ok2 && mentions(r2, "routes[2].action"), "RT-1c a Forward route naming a target that is not in the table is reported at routes[2].action");
+    var full = tcprouter::Config { .. };
+    listener(full, 1, "0.0.0.0:80", tcprouter::Inspect.None);
+    var last: u16 = 0;
+    for k in 65 { last = tcprouter::add_target(full, tcprouter::target(["10.0.0.5:80"])); }
+    full.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: last }));
+    let r3, ok3 = report(full);
+    check(full.targets.len == 64 && !ok3 && mentions(r3, "routes[0].action"), "RT-1c a 65th target does not fit: its index is rejected by the check");
+}
+
 fn main() {
+    test_target_table();
     test_overflows();
     test_good();
     test_duplicate_listener_ids();
