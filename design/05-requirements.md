@@ -45,7 +45,7 @@ Columns: id · behaviour · priority · test · status.
 | RT-4b | Half-close: client shuts down writing → backend sees EOF, and the backend's remaining reply still reaches the client; and the reverse | v1 | `forward_test` | done |
 | RT-4c | A refused or timed-out connect is retried on the next target address **before any client byte is consumed**, and the client sees a normal reply | v1 | `retry_test` | green (refused half; timed-out half in M4) |
 | RT-4d | When every target fails, the client connection is closed and `connect_failed` counted | v1 | `retry_test` | green |
-| RT-4e | `forward(c, target)` from handler mode works only before any byte was consumed; afterwards it is refused | v1 | `handler_test` | red (awaiting approval) |
+| RT-4e | `forward(c, target)` from handler mode works only before any byte was consumed; afterwards it is refused | v1 | `handler_test` | green |
 | RT-4f | Throughput and p99 latency within 10% of the C proxy's copy engine on the same host (`bench/`) | v2 | `bench/compare.sh` | design |
 | RT-4g | splice forwarding with a pipe pool; same tests as RT-4a/b pass | v2 | `forward_test --splice` | design |
 
@@ -57,7 +57,7 @@ Columns: id · behaviour · priority · test · status.
 | RT-5b | Memory per idle connection ≤ 512 bytes of worker memory beyond kernel socket buffers (RSS growth over 10,000 idle) | v1 | `memory_test` | green |
 | RT-5c | A destination that stops reading stops the engine reading from the source; RSS grows ≤ 64 MB while 1 GB is offered (measured growth printed each run) | v1 | `backpressure_test` | green |
 | RT-5d | With the pool exhausted, the worker keeps serving other connections as buffers return; no abort, waits counted | v1 | `backpressure_test` | green |
-| RT-5e | Handler `send` returns false at the per-connection cap and `Writable` follows once drained; memory stays bounded | v1 | `handler_test` | red (awaiting approval) |
+| RT-5e | Handler `send` returns false at the per-connection cap and `Writable` follows once drained; memory stays bounded | v1 | `handler_test` | green |
 | RT-5f | One busy connection can't starve others: with one 1 GB stream and 100 small request/reply clients, small p99 < 10 ms | v1 | `fairness_test` | design |
 | RT-5g | No allocation on the established forwarding path (Goose `--stats` or data-stack high-water flat across 10 GB forwarded) | v1 | `memory_test` | design |
 
@@ -92,10 +92,10 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-9a | Events arrive in order per connection: Opened, Data…, Closed; exactly one Closed | v1 | `handler_test` | red (awaiting approval) |
-| RT-9b | An HTTP/1.1 keep-alive server built on handler mode (`examples/http_hello`) serves 100,000 requests from 100 clients with 0 errors | v1 | `examples_test` | red (awaiting approval) |
-| RT-9c | `close` sends queued bytes first; `abort` resets at once | v1 | `handler_test` | red (awaiting approval) |
-| RT-9d | `Tick` arrives at least every 100 ms while the worker runs | v1 | `handler_test` | red (awaiting approval) |
+| RT-9a | Events arrive in order per connection: Opened, Data…, Closed; exactly one Closed | v1 | `handler_test` | green |
+| RT-9b | An HTTP/1.1 keep-alive server built on handler mode (`examples/http_hello`) serves 100,000 requests from 100 clients with 0 errors | v1 | `examples_test` | green |
+| RT-9c | `close` sends queued bytes first; `abort` resets at once | v1 | `handler_test` | green |
+| RT-9d | `Tick` arrives at least every 100 ms while the worker runs | v1 | `handler_test` | green |
 
 ## RT-10 Stats and messages
 
@@ -108,6 +108,6 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-11a | README with a working forward example and the HTTP example, both built by CI | v1 | `examples_test` | partly red: the examples build (awaiting approval); the README example is later |
+| RT-11a | README with a working forward example and the HTTP example, both built by CI | v1 | `examples_test` | partly green: the examples build and http_hello runs; the README example is later |
 | RT-11b | Every public function has a comment saying what it does, who owns what, and whether it can fail | v1 | review | design |
 | RT-11c | `docs/memory.md`: what allocates and when, measured | v1 | review | design |

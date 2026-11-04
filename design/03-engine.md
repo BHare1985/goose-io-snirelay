@@ -184,3 +184,21 @@ benchmarks, so tcprouter does not carry a second engine.
   next address, wrapping, until each has been tried once; then it is closed as `ConnectFailed`. The client has no
   interest registered until the server answers, so none of its bytes are consumed before a connect succeeds (RT-4c).
   `connect_failures` counts every failed attempt and `retries` the failures that were followed by another attempt.
+
+## 13. As built: handler mode (M3 group C)
+
+- **Events are queued, not called.** The engine appends flat `_PendingEvent` records (Opened, Data, Writable, Closed) while it
+  dispatches a batch of epoll events, and `serve` drains the queue after the batch and after each Tick, calling the user's block
+  once per record, including the records the block itself causes. No engine function is generic over the block, and the events
+  of one connection are in the order they happened (RT-9a).
+- **A Data event owns its pool buffer until the block returns**, and a connection has at most one Data pending (reading stops
+  until the block has seen it), so a slow handler pins at most one buffer per connection. If the connection closes first, the
+  record still owns the buffer and gives it back after delivery.
+- **Output** is a queue of up to 4 pool buffers per connection; `send` is all or nothing, copies, then writes what the socket takes
+  at once. `Writable` is queued once, after a refused send, when the queue drops below one buffer.
+- **A peer's FIN closes the connection after the flush** (v1: no half-closed handler connections). `close` does the same, with
+  reason `ByHandler`; `reset` closes now with an RST.
+- **`forward`** copies the `Target` into a side table (`_override_targets`; a free entry has no addresses) and hands the connection
+  to the forwarding path; the handler's ownership ends there and no Closed event follows.
+- **Measured:** 100,000 keep-alive requests from 100 clients in 2.4 s (client-bound: Python); 50 Ticks in 5 s with the largest gap
+  101 ms under 50 busy connections; a 64 MB send to a client that reads nothing for 2 s grew the server's RSS by 164 kB.

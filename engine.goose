@@ -79,6 +79,9 @@ root struct Worker {
     _waiting_reads_head: i64 = 0,
     _inspect_buffer: u8[32768] = [0; 32768],     // where a ClientHello is peeked at: one per worker, one inspect at a time
     _inspect_scratch: u8[16384] = [0; 16384],    // where parse_hello reassembles a hello split over records
+    _pending: _PendingEvent[>..] = [],           // handler events queued during a batch, drained by serve (handler.goose)
+    _pending_head: i64 = 0,
+    _override_targets: Target[>..] = [],         // targets given to forward(); a free entry has no addresses
     _listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
 }
 
@@ -123,6 +126,7 @@ fn serve<F>(w: Worker&) {
         } else {
             for k in n { _dispatch_event(w, events[k].data, events[k].events); }
         }
+        _deliver_events(w, F);
         let now = c_boottime_ms();
         _resume_paused_listeners(w, now);
         if now - last_sweep >= 250 {
@@ -133,6 +137,7 @@ fn serve<F>(w: Worker&) {
             last_tick = now;
             let tick: Event = Event.Tick { now_ms: now };
             F(w, tick);
+            _deliver_events(w, F);
         }
     }
 }
@@ -142,29 +147,6 @@ fn serve<P, F>(w: Worker&, p: P&) {
     let e: Event = Event.Tick { now_ms: 0 };    // STUB until M3
     F(w, e);
 }
-
-// --- calls a handler block may make (on the worker it was called on) -----------------------------
-
-// Queues bytes to the peer. False if the connection is gone or its output queue is full; in the
-// second case wait for Writable. Never blocks, never grows memory past the per-connection cap (RT-5e).
-fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool { return false; }    // STUB
-
-// Closes after the queued bytes are sent.
-fn close(w: Worker&, c: Conn) {}                                                // STUB
-
-// Closes now with an RST. (Named `reset`, not `abort`, which would hide Goose's builtin here.)
-fn reset(w: Worker&, c: Conn) {}                                                // STUB
-
-// Your own id for this connection, returned in every later event. tcprouter stores only the u32.
-fn set_user(w: Worker&, c: Conn, user: u32) {}                                  // STUB
-fn user(w: Worker&, c: Conn) -> u32 { return 0; }                               // STUB
-
-// Stops or resumes reading from the peer: your own backpressure.
-fn pause_reading(w: Worker&, c: Conn, paused: bool) {}                          // STUB
-
-// Hands the connection to the engine's forwarding. Only before any byte was consumed; returns
-// false (and does nothing) afterwards (RT-4e).
-fn forward(w: Worker&, c: Conn, to: Target) -> bool { return false; }           // STUB
 
 // --- running workers and talking to them --------------------------------------------------------
 

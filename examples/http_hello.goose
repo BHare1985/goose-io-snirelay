@@ -12,6 +12,8 @@ import os;
 
 struct Session { inbox: u8[..2048], live: bool }
 
+// The response is small, so one send is enough. A response bigger than the send queue (4 buffers, 64 KB by default) must be
+// sent in pieces, the next when Writable arrives: see design/02-api.md section 4 and tests/net/harness/handler_server.goose.
 let RESPONSE = "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nContent-Type: text/plain\r\n\r\nhello\n";
 
 // One request head ends at a blank line. Answers every complete head in the buffer.

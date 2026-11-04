@@ -20,6 +20,7 @@ import .route;
 import .sni;
 import os;
 
+let _STATE_HANDLING: u8 = 4;         // Action.Handle: the user's code owns the connection through events
 let _STATE_INSPECTING: u8 = 3;       // an inspect: Sni listener: waiting for the ClientHello, which stays queued in the kernel
 let _STATE_CONNECTING: u8 = 1;       // the connect to the server is in progress; the client is not read yet
 let _STATE_FORWARDING: u8 = 2;
@@ -54,6 +55,18 @@ struct _ConnectionSlot {
     route_index: u16,            // the route the connection took (an index into cfg.routes)
     first_target: u8,            // the address the built-in policy starts with
     attempts: u8,                // addresses tried so far
+    tag: u16,                    // handler mode: the tag of the Handle route
+    override_target: i32,        // a connection the handler forwarded: its target's index in w._override_targets, else -1
+    out_buffers: i32[4],         // handler mode: the output queue, oldest first, at most 4 pool buffers
+    out_lengths: i32[4],
+    out_count: u8,
+    out_pos: i32,                // bytes of the oldest queued buffer already written
+    consumed: bool,              // a byte was handed to the handler or sent: forward() is no longer allowed
+    paused: bool,                // pause_reading
+    data_pending: bool,          // a Data event is queued and holds this connection's read buffer
+    want_writable: bool,         // a send was refused: tell the handler when it would fit
+    closing: bool,               // flush the queue, then close with closing_reason
+    closing_reason: CloseReason,
     up: _Direction,                  // client to server
     down: _Direction,                // server to client
 }
@@ -178,7 +191,18 @@ fn _direction_has_pending_bytes(d: _Direction) -> bool { return d.len > d.pos; }
 // nothing unwritten and is not waiting for a buffer; wait for writability only where bytes are pending.
 fn _update_epoll_interest(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
-    if !s.live || s.state != _STATE_FORWARDING { return; }
+    if !s.live { return; }
+    if s.state == _STATE_HANDLING {
+        var m: u32 = 0;
+        if _handler_can_read(s) { m |= c_EPOLLIN; }
+        if s.out_count > 0 { m |= c_EPOLLOUT; }
+        if m != s.client_mask {
+            c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, m, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
+            s.client_mask = m;
+        }
+        return;
+    }
+    if s.state != _STATE_FORWARDING { return; }
     var cm: u32 = 0;
     var sm: u32 = 0;
     if _direction_can_read(s.up) { cm |= c_EPOLLIN; }
@@ -204,11 +228,14 @@ fn _close_connection(w: Worker&, i: i64, reason: CloseReason) {
     if !s.live { return; }
     if s.client_fd >= 0 { c_close(s.client_fd); }
     if s.server_fd >= 0 { c_close(s.server_fd); }
+    if s.state == _STATE_HANDLING { _queue_closed(w, i, reason); }
+    for k in s.out_count { _give_back_buffer(w, s.out_buffers[k]); }
+    if s.override_target >= 0 { w._override_targets[s.override_target].addrs.clear(); }
     s.live = false;
     s.client_fd = -1;
     s.server_fd = -1;
     s.gen = (s.gen + 1) & 0xffffff;
-    let up_buf = s.up.buf;
+    let up_buf = if s.data_pending { -1 } else { s.up.buf };       // a queued Data event still owns that buffer
     let down_buf = s.down.buf;
     s.up = _Direction { .. };
     s.down = _Direction { .. };
@@ -263,43 +290,38 @@ fn _reject_connection(w: Worker&, fd: i32, reason: CloseReason) {
     w._stats.closed[_close_reason_index(reason)]++;
 }
 
+fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool) -> _ConnectionSlot {
+    return _ConnectionSlot {
+        gen: gen, live: true, state: if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING }, client_fd: fd, server_fd: -1,
+        client_mask: if inspect { c_EPOLLIN } else { 0 }, server_mask: 0, listener: listener, user: 0, started_ms: c_boottime_ms(),
+        inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tag: 0, override_target: -1,
+        out_buffers: [-1; 4], out_lengths: [0; 4], out_count: 0, out_pos: 0, consumed: false, paused: false,
+        data_pending: false, want_writable: false, closing: false, closing_reason: CloseReason.PeerClosed,
+        up: _Direction { .. }, down: _Direction { .. },
+    };
+}
+
 fn _new_connection(w: Worker&, li: i64, fd: i32) {
     w._stats.accepted++;
     if w._stats.open >= w.cfg.limits.max_conns_per_worker { _reject_connection(w, fd, CloseReason.Error); return; }
     let inspect = w.cfg.listeners[li].inspect == Inspect.Sni;
 
-    // A slot, reused when one is free.
+    // A slot, reused when one is free; a reused slot keeps its generation (bumped when it was freed).
     var i: i64 = 0;
+    var gen: u32 = 1;
     if w._free_slots.len > 0 {
         i = w._free_slots.pop();
+        gen = w._connection_slots[i].gen;
+        w._connection_slots[i] = _fresh_slot(gen, fd, w.cfg.listeners[li].id, inspect);
     } else {
         i = w._connection_slots.len;
-        w._connection_slots.push(_ConnectionSlot { gen: 1, live: false, state: 0, client_fd: -1, server_fd: -1, client_mask: 0,
-                                                   server_mask: 0, listener: 0, user: 0, started_ms: 0, inspect_seen: 0,
-                                                   rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0,
-                                                   up: _Direction { .. }, down: _Direction { .. } });
+        w._connection_slots.push(_fresh_slot(gen, fd, w.cfg.listeners[li].id, inspect));
     }
     let s .= w._connection_slots[i];
-    s.live = true;
-    s.state = if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING };
-    s.client_fd = fd;
-    s.server_fd = -1;
-    s.server_mask = 0;
-    s.listener = w.cfg.listeners[li].id;
-    s.user = 0;
-    s.started_ms = c_boottime_ms();
-    s.inspect_seen = 0;
-    s.rcvlowat_raised = false;
-    s.route_index = 0;
-    s.first_target = 0;
-    s.attempts = 0;
-    s.up = _Direction { .. };
-    s.down = _Direction { .. };
     w._stats.open++;
 
     // The client is registered at once. While a hello is awaited it is watched for input; otherwise it has no
     // interest at all until the server answers, so a failed connect can be retried with its bytes untouched.
-    s.client_mask = if inspect { c_EPOLLIN } else { 0 };
     let rc = c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, fd, s.client_mask, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
     if rc < 0 { _close_connection(w, i, CloseReason.Error); return; }
     if !inspect {
@@ -365,21 +387,33 @@ fn _route_and_connect(w: Worker&, i: i64, hello: Hello) {
     guard route else { _close_connection(w, i, CloseReason.ByHandler); return; }
     s.route_index = w.cfg.routes.index_of(route) as u16;
 
-    // Only forwarding exists so far (handler mode: M3 group C).
     var count = 0;
+    var handle = false;
+    var tag: u16 = 0;
     match route.action {
         Forward f => { count = f.to.addrs.len; },
+        Handle h => { handle = true; tag = h.tag; },
         _ => {},
     }
+    if handle { _start_handling(w, i, tag, hello); return; }
     if count == 0 { _close_connection(w, i, CloseReason.ByHandler); return; }
+    _start_connecting(w, i, count);
+}
 
-    // The built-in policy: connection k starts at address k mod n and moves on, wrapping, after each failure.
+// Done with the hello: the client's low-water mark goes back to 1.
+fn _end_inspection(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    if s.rcvlowat_raised { c_set_rcvlowat(s.client_fd, 1); s.rcvlowat_raised = false; }
+}
+
+// Forwarding: the client is left alone until the server answers. The built-in policy: connection k starts at
+// address k mod n and moves on, wrapping, after each failure.
+fn _start_connecting(w: Worker&, i: i64, count: i64) {
+    let s .= w._connection_slots[i];
     s.first_target = (w._round_robin % count) as u8;
     w._round_robin++;
     s.attempts = 0;
-
-    // Done with the hello: the client is left alone until the server answers, and its low-water mark goes back to 1.
-    if s.rcvlowat_raised { c_set_rcvlowat(s.client_fd, 1); s.rcvlowat_raised = false; }
+    _end_inspection(w, i);
     if s.client_mask != 0 {
         c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, 0, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
         s.client_mask = 0;
@@ -388,7 +422,22 @@ fn _route_and_connect(w: Worker&, i: i64, hello: Hello) {
     _attempt_connect(w, i);
 }
 
+// Handler mode: the user's code gets the connection as events. Opened goes first; reading starts once it is queued.
+fn _start_handling(w: Worker&, i: i64, tag: u16, hello: Hello) {
+    let s .= w._connection_slots[i];
+    _end_inspection(w, i);
+    s.state = _STATE_HANDLING;
+    s.tag = tag;
+    let opened .= _queue_event(w, _PENDING_OPENED, i);
+    match hello {
+        Found f => { opened.sni.append(f.name); },
+        _ => {},
+    }
+    _update_epoll_interest(w, i);
+}
+
 fn _target_of(w: Worker&, s: _ConnectionSlot&) -> Target {
+    if s.override_target >= 0 { return w._override_targets[s.override_target]; }
     var target = Target { addrs: [] };
     match w.cfg.routes[s.route_index as i64].action {
         Forward f => { target = f.to; },
@@ -559,6 +608,19 @@ fn _dispatch_event(w: Worker&, data: u64, events: u32) {
     if s.state == _STATE_INSPECTING {
         if (events & c_EPOLLERR) != 0 { _close_connection(w, slot, CloseReason.PeerReset); return; }
         if kind == _EVENT_KIND_CLIENT { _inspect_connection(w, slot); }           // input, or the peer ended
+        return;
+    }
+    if s.state == _STATE_HANDLING {
+        if kind != _EVENT_KIND_CLIENT { return; }
+        if (events & c_EPOLLERR) != 0 { _close_connection(w, slot, CloseReason.PeerReset); return; }
+        if (events & c_EPOLLOUT) != 0 {
+            _flush_output(w, slot);
+            if !s.live { return; }
+        }
+        if (events & (c_EPOLLIN | c_EPOLLHUP)) != 0 {
+            if (events & c_EPOLLIN) == 0 && !_handler_can_read(s) { _close_connection(w, slot, CloseReason.PeerReset); return; }
+            _read_for_handler(w, slot);
+        }
         return;
     }
     if s.state == _STATE_CONNECTING {

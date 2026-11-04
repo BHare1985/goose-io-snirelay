@@ -112,8 +112,9 @@ fn on_opened(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprout
         var t = tcprouter::Target { addrs: [] };
         t.addrs.push(tcprouter::Addr { text: FORWARD_TO });
         let ok = tcprouter::forward(w, conn, t);
-        s.forwarded = ok;
         log(str("E forward ", conn_name(conn), " result=", ok));
+        if ok { sessions.free(index); }             // ownership ended: no Closed event will come, so free the state now
+        else { s.forwarded = true; }
     }
 }
 

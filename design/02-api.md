@@ -154,9 +154,17 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool        // hand the conn to t
   so the engine's `c.slot` can't key yours). tcprouter never stores your state, only the u32.
   Per-connection growable state can't be a pool element (resizable elements are rejected [V]): use
   `u8[..N]` or a `slice_pool` run. Check a `user` id against the pool's length before indexing.
-- **Output is buffered by the engine** up to a per-connection cap (`limits.buffer_size × 4`);
-  `send` returns false at the cap and you get `Writable` when it drains. A server that ignores
-  `false` loses data only on that connection, never memory (RT-5e).
+- **`send` is all or nothing, and the queue holds at most 4 pool buffers** (`limits.buffer_size × 4`, 64 KB at the
+  default size). It returns false, queueing nothing, if the connection is gone or closing, or if the bytes do not fit.
+  **A response larger than the cap must be sent in pieces**, the next piece when `Writable` arrives (after a false you get
+  exactly one `Writable` once there is room). A server that ignores `false` loses data only on that connection, never
+  memory (RT-5e). `examples/http_hello.goose` sends a small response in one call and says where to look for larger ones;
+  `tests/net/harness/handler_server.goose` (tags 2 and 3) shows the loop.
+- **`forward` ends your ownership.** When it returns true no `Closed` event follows for that connection: **free your
+  per-connection state when `forward` returns true** (handler_server tag 4 does exactly that). It returns false, and does
+  nothing, once a byte has been read for the handler or sent.
+- **v1 limit: no half-closed handler connections.** When the peer closes its sending side, the connection is closed after
+  the queued output has been flushed (`Closed` with `PeerClosed`); a handler cannot answer after the peer's FIN.
 - **The `return` trap** (also in the README): a `return` inside the block leaves the function that
   contains the block, here the whole worker. Never put logic inline in the block.
   ```goose
