@@ -5,6 +5,10 @@
 //     forward_server --listen 127.0.0.1:9000 [--listen [::1]:9000] --to 127.0.0.1:9100 [--to …]
 //                    [--route LISTEN=TARGET[,TARGET…] …]
 //                    [--workers 1] [--buffers 4096] [--buffer-size 16384] [--stat-ms 1000]
+//                    [--inspect-listen ADDR] [--sni NAME=T[,T]] [--sni-suffix NAME=T[,T]] [--sni-none T[,T]] [--sni-any T[,T]]
+//                    [--connect-timeout-ms N] [--inspect-timeout-ms N]
+// --inspect-listen: one listener with `inspect: Sni`; the --sni* flags add its routes, in the order given:
+//   --sni exact name, --sni-suffix names below a domain, --sni-none no name / not TLS, --sni-any everything else.
 // --listen/--to: every --listen forwards to every --to. --route: one listener with its own targets
 // (an address containing ':' is fine: the split is at the '=').
 //
@@ -23,6 +27,10 @@ root struct Options {
     listens: u8[][>..] = [],
     targets: u8[][>..] = [],
     routes: u8[][>..] = [],
+    inspect_listen: u8[][>..] = [],
+    sni_specs: u8[][>..] = [],          // "sni:NAME=T,T", "suffix:NAME=T", "none:T", "any:T", in flag order
+    connect_timeout_ms: i64 = 0,
+    inspect_timeout_ms: i64 = 0,
     workers: i64 = 1,
     buffers: i64 = 4096,
     buffer_size: i64 = 16384,
@@ -52,7 +60,10 @@ fn print_stats(w: tcprouter::Worker&, index: i64) {
            " bytes_in=", s.bytes_in, " bytes_out=", s.bytes_out,
            " connect_failures=", s.connect_failures, " retries=", s.retries,
            " buffers_total=", s.buffers_total, " buffers_in_use=", s.buffers_in_use,
-           " buffer_waits=", s.buffer_waits);
+           " buffer_waits=", s.buffer_waits, " stale_events=", s.stale_events, " bad_events=", s.bad_events,
+           " accept_failures=", s.accept_failures);
+    format(line, " closed=");
+    for k in 11 { if k > 0 { line.push(','); } format(line, s.closed[k]); }
     print(line);
 }
 
@@ -95,6 +106,13 @@ fn parse_options(o: Options&) {
         if flag == "--listen" { o.listens.push(value); }
         else if flag == "--to" { o.targets.push(value); }
         else if flag == "--route" { o.routes.push(value); }
+        else if flag == "--inspect-listen" { o.inspect_listen.push(value); }
+        else if flag == "--sni" { o.sni_specs.push(str("sni:", value)); }
+        else if flag == "--sni-suffix" { o.sni_specs.push(str("suffix:", value)); }
+        else if flag == "--sni-none" { o.sni_specs.push(str("none:", value)); }
+        else if flag == "--sni-any" { o.sni_specs.push(str("any:", value)); }
+        else if flag == "--connect-timeout-ms" { o.connect_timeout_ms = number(value, flag); }
+        else if flag == "--inspect-timeout-ms" { o.inspect_timeout_ms = number(value, flag); }
         else if flag == "--workers" { o.workers = number(value, flag); }
         else if flag == "--buffers" { o.buffers = number(value, flag); }
         else if flag == "--buffer-size" { o.buffer_size = number(value, flag); }
@@ -107,7 +125,9 @@ fn parse_options(o: Options&) {
 fn main() {
     var o = Options { .. };
     parse_options(o);
-    if o.routes.len == 0 && (o.listens.len == 0 || o.targets.len == 0) { die("need --route, or --listen and --to"); }
+    if o.routes.len == 0 && o.inspect_listen.len == 0 && (o.listens.len == 0 || o.targets.len == 0) {
+        die("need --route, --inspect-listen, or --listen and --to");
+    }
 
     var cfg = tcprouter::Config { .. };
     cfg.limits.buffers_per_worker = o.buffers;
@@ -137,6 +157,36 @@ fn main() {
             t.addrs.push(tcprouter::addr(it));
         };
         cfg.routes.push(tcprouter::any_route(id, tcprouter::Action.Forward { to: t }));
+        id++;
+    }
+
+    if o.connect_timeout_ms > 0 { cfg.limits.connect_timeout_ms = o.connect_timeout_ms; }
+    if o.inspect_timeout_ms > 0 { cfg.limits.inspect_timeout_ms = o.inspect_timeout_ms; }
+    var have_inspect = false;
+    for text in o.inspect_listen {                  // an array of strings can be walked, not indexed
+        if !have_inspect {
+            cfg.listeners.push(tcprouter::Listener { id: id, addr: tcprouter::addr(text), inspect: tcprouter::Inspect.Sni });
+            have_inspect = true;
+        }
+    }
+    if have_inspect {
+        for spec in o.sni_specs {
+            let colon = find(spec, ":");
+            let kind = spec[..colon];
+            let rest = spec[colon + 1..];
+            let has_name = kind == "sni" || kind == "suffix";
+            let eq = find(rest, "=");
+            if has_name && eq < 0 { die(str("--sni needs NAME=TARGET, got '", rest, "'")); }
+            let name = if has_name { rest[..eq] } else { "" };
+            let targets = if has_name { rest[eq + 1..] } else { rest };
+            var t = tcprouter::Target { addrs: [] };
+            each_split(targets, ',') { t.addrs.push(tcprouter::addr(it)); };
+            let action = tcprouter::Action.Forward { to: t };
+            if kind == "sni" { cfg.routes.push(tcprouter::sni_route(id, name, action)); }
+            else if kind == "suffix" { cfg.routes.push(tcprouter::sni_suffix_route(id, name, action)); }
+            else if kind == "none" { cfg.routes.push(tcprouter::Route { listener: id, on: tcprouter::Match.NoSni, action: action }); }
+            else { cfg.routes.push(tcprouter::any_route(id, action)); }
+        }
         id++;
     }
 

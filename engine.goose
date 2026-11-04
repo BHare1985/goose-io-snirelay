@@ -14,6 +14,7 @@ struct Conn { slot: u32, gen: u32 }
 enum CloseReason {
     PeerClosed, PeerReset, IdleTimeout, HalfCloseTimeout, InspectTimeout, ConnectFailed,
     Fenced, Drained, ByHandler, Error,
+    InvalidHello,       // the first bytes were a TLS handshake that breaks the format or exceeds 16 KB (RT-3f)
 }
 
 // What your serve block is called with. Read it with `match`.
@@ -38,7 +39,7 @@ enum Event {
 struct Stats {
     accepted: i64,            // connections accepted
     open: i64,                // connections open now
-    closed: i64[10],          // connections closed, by CloseReason in declaration order
+    closed: i64[11],          // connections closed, by CloseReason in declaration order
     bytes_in: i64,            // client to server, forwarded
     bytes_out: i64,           // server to client, forwarded
     connect_failures: i64,    // outgoing connects that failed

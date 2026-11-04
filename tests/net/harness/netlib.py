@@ -163,12 +163,14 @@ class ServerDied(Exception):
 
 class Server:
     """Runs forward_server and follows its stdout/stderr."""
-    def __init__(self, listens, targets, workers=1, buffers=None, buffer_size=None, stat_ms=1000, nofile=None, routes=()):
+    def __init__(self, listens, targets, workers=1, buffers=None, buffer_size=None, stat_ms=1000, nofile=None, routes=(),
+                 extra=()):
         self.workers = workers
         self.args = [SERVER]
         for l in listens: self.args += ["--listen", l]
         for t in targets: self.args += ["--to", t]
         for listen, tos in routes: self.args += ["--route", f"{listen}={','.join(tos)}"]
+        self.args += list(extra)
         self.args += ["--workers", str(workers), "--stat-ms", str(stat_ms)]
         if buffers: self.args += ["--buffers", str(buffers)]
         if buffer_size: self.args += ["--buffer-size", str(buffer_size)]
@@ -204,7 +206,7 @@ class Server:
                     d = {"worker": int(parts[1])}
                     for kv in parts[2:]:
                         k, v = kv.split("=")
-                        d[k] = int(v)
+                        d[k] = [int(x) for x in v.split(",")] if "," in v else int(v)
                     d["at"] = time.time()
                     self.stats[d["worker"]] = d
                     self.stat_lines += 1
@@ -232,6 +234,25 @@ class Server:
     def total(self, key):
         with self._lock:
             return sum(s.get(key, 0) for s in self.stats.values())
+
+    CLOSE_REASONS = ["PeerClosed", "PeerReset", "IdleTimeout", "HalfCloseTimeout", "InspectTimeout",
+                     "ConnectFailed", "Fenced", "Drained", "ByHandler", "Error", "InvalidHello"]
+
+    def closed(self, reason):
+        """Connections closed for `reason` (a CloseReason name), summed over workers."""
+        i = self.CLOSE_REASONS.index(reason)
+        with self._lock:
+            return sum((s.get("closed") or [0] * 11)[i] for s in self.stats.values())
+
+    def wait_closed(self, reason, pred, timeout=5):
+        end = time.time() + timeout
+        v = self.closed(reason)
+        while time.time() < end:
+            v = self.closed(reason)
+            if pred(v):
+                return v
+            time.sleep(0.05)
+        return v
 
     def stat_of(self, worker, key):
         with self._lock:
@@ -264,6 +285,8 @@ class Server:
         return rss_kb(self.proc.pid)
 
     def stop(self):
+        if not hasattr(self, "proc"):
+            return                          # start() never got as far as a process
         if self.proc.poll() is None:
             self.proc.send_signal(signal.SIGTERM)
             try:

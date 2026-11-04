@@ -75,7 +75,7 @@ fn _fail_start(w: Worker&, what: const u8[:], where: const u8[:], err: i32) -> b
 fn _close_reason_index(r: CloseReason) -> i64 {
     return match r {
         PeerClosed => 0, PeerReset => 1, IdleTimeout => 2, HalfCloseTimeout => 3, InspectTimeout => 4,
-        ConnectFailed => 5, Fenced => 6, Drained => 7, ByHandler => 8, Error => 9,
+        ConnectFailed => 5, Fenced => 6, Drained => 7, ByHandler => 8, Error => 9, InvalidHello => 10,
     };
 }
 
