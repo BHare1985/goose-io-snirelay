@@ -66,7 +66,7 @@ fn c_pause_ms(ms: i64) { sleep_ms(ms); }
 fn c_fail(w: Worker&, what: const u8[:], where: const u8[:], err: i32) -> bool {
     var msg: u8[>..] = [];
     format(msg, what, " ", where, ": ");
-    tcprouter_sys::c_strerror(msg, err);
+    c_strerror(msg, err);
     let n = if msg.len < w.error.cap { msg.len } else { w.error.cap };
     w.error.append(msg[..n]);
     return false;
@@ -87,16 +87,16 @@ fn c_probe_listeners(cfg: Config) {
         var p = c_Parsed { false, [0; 16], 0 };
         let text = cfg.listeners[li].addr.text;
         if !c_parse_addr(text, p) { continue; }                 // check() reports bad text; start() fails
-        let fd = tcprouter_sys::c_listen(p.v6, p.ip, p.port, false, 1);
+        let fd = c_listen(p.v6, p.ip, p.port, false, 1);
         if fd < 0 {
             var msg: u8[>..] = [];
             format(msg, "cannot listen on ", text, ": ");
-            tcprouter_sys::c_strerror(msg, -fd);
+            c_strerror(msg, -fd);
             let n = if msg.len < c_spawn_error.cap { msg.len } else { c_spawn_error.cap };
             c_spawn_error.append(msg[..n]);
             return;
         }
-        tcprouter_sys::c_close(fd);
+        c_close(fd);
     }
 }
 
@@ -174,16 +174,16 @@ fn c_update_interest(w: Worker&, i: i64) {
     if !s.live || s.state != C_FORWARDING { return; }
     var cm: u32 = 0;
     var sm: u32 = 0;
-    if c_can_read(s.up) { cm |= tcprouter_sys::EPOLLIN; }
-    if c_has_pending(s.down) { cm |= tcprouter_sys::EPOLLOUT; }
-    if c_can_read(s.down) { sm |= tcprouter_sys::EPOLLIN; }
-    if c_has_pending(s.up) { sm |= tcprouter_sys::EPOLLOUT; }
+    if c_can_read(s.up) { cm |= c_EPOLLIN; }
+    if c_has_pending(s.down) { cm |= c_EPOLLOUT; }
+    if c_can_read(s.down) { sm |= c_EPOLLIN; }
+    if c_has_pending(s.up) { sm |= c_EPOLLOUT; }
     if cm != s.client_mask {
-        tcprouter_sys::c_epoll_ctl(w.c_epfd, tcprouter_sys::EPOLL_CTL_MOD, s.client_fd, cm, c_pack(C_KIND_CLIENT, i, s.gen));
+        c_epoll_ctl(w.c_epfd, c_EPOLL_CTL_MOD, s.client_fd, cm, c_pack(C_KIND_CLIENT, i, s.gen));
         s.client_mask = cm;
     }
     if sm != s.server_mask {
-        tcprouter_sys::c_epoll_ctl(w.c_epfd, tcprouter_sys::EPOLL_CTL_MOD, s.server_fd, sm, c_pack(C_KIND_SERVER, i, s.gen));
+        c_epoll_ctl(w.c_epfd, c_EPOLL_CTL_MOD, s.server_fd, sm, c_pack(C_KIND_SERVER, i, s.gen));
         s.server_mask = sm;
     }
 }
@@ -195,8 +195,8 @@ fn c_update_interest(w: Worker&, i: i64) {
 fn c_close_conn(w: Worker&, i: i64, reason: CloseReason) {
     let s .= w.c_slots[i];
     if !s.live { return; }
-    if s.client_fd >= 0 { tcprouter_sys::c_close(s.client_fd); }
-    if s.server_fd >= 0 { tcprouter_sys::c_close(s.server_fd); }
+    if s.client_fd >= 0 { c_close(s.client_fd); }
+    if s.server_fd >= 0 { c_close(s.server_fd); }
     s.live = false;
     s.client_fd = -1;
     s.server_fd = -1;
@@ -216,14 +216,14 @@ fn c_close_conn(w: Worker&, i: i64, reason: CloseReason) {
 
 fn c_accept_ready(w: Worker&, li: i64) {
     for k in 64 {                                        // a bounded batch per wakeup keeps the loop fair
-        let fd = tcprouter_sys::c_accept(w.c_listen_fds[li]);
+        let fd = c_accept(w.c_listen_fds[li]);
         if fd < 0 { return; }                            // -EAGAIN: none waiting (other errors: M3, RT-1e)
         c_new_conn(w, li, fd);
     }
 }
 
 fn c_reject(w: Worker&, fd: i32, reason: CloseReason) {
-    tcprouter_sys::c_close(fd);
+    c_close(fd);
     w.c_st.closed[c_reason_index(reason)]++;
 }
 
@@ -276,19 +276,19 @@ fn c_connect(w: Worker&, i: i64, text: const u8[:]) {
     let s .= w.c_slots[i];
     var p = c_Parsed { false, [0; 16], 0 };
     if !c_parse_addr(text, p) { w.c_st.connect_failures++; c_close_conn(w, i, CloseReason.ConnectFailed); return; }
-    let sfd = tcprouter_sys::c_connect_start(p.v6, p.ip, p.port);
+    let sfd = c_connect_start(p.v6, p.ip, p.port);
     if sfd < 0 { w.c_st.connect_failures++; c_close_conn(w, i, CloseReason.ConnectFailed); return; }
     s.server_fd = sfd;
     // The client is registered with no interest: nothing of it is read before the server answers, so a
     // failed connect can still be retried with the client's bytes untouched (RT-4c).
-    tcprouter_sys::c_epoll_ctl(w.c_epfd, tcprouter_sys::EPOLL_CTL_ADD, s.client_fd, 0, c_pack(C_KIND_CLIENT, i, s.gen));
-    s.server_mask = tcprouter_sys::EPOLLOUT;
-    tcprouter_sys::c_epoll_ctl(w.c_epfd, tcprouter_sys::EPOLL_CTL_ADD, sfd, s.server_mask, c_pack(C_KIND_SERVER, i, s.gen));
+    c_epoll_ctl(w.c_epfd, c_EPOLL_CTL_ADD, s.client_fd, 0, c_pack(C_KIND_CLIENT, i, s.gen));
+    s.server_mask = c_EPOLLOUT;
+    c_epoll_ctl(w.c_epfd, c_EPOLL_CTL_ADD, sfd, s.server_mask, c_pack(C_KIND_SERVER, i, s.gen));
 }
 
 fn c_connect_done(w: Worker&, i: i64) {
     let s .= w.c_slots[i];
-    let err = tcprouter_sys::c_connect_result(s.server_fd);
+    let err = c_connect_result(s.server_fd);
     if err != 0 {
         w.c_st.connect_failures++;
         c_close_conn(w, i, CloseReason.ConnectFailed);
@@ -320,7 +320,7 @@ fn c_read(w: Worker&, i: i64, up: bool) {
         dir.buf = b;
     }
     let buf = c_buf(w, dir.buf);
-    let n = tcprouter_sys::c_recv(src, buf[0], buf.len);
+    let n = c_recv(src, buf[0], buf.len);
     if n > 0 {
         dir.len = n as i32;
         dir.pos = 0;
@@ -335,12 +335,12 @@ fn c_read(w: Worker&, i: i64, up: bool) {
     c_give_buf(w, held);
     if n == 0 {                                           // the source ended: tell the destination, stop reading
         dir.eof = true;
-        tcprouter_sys::c_shutdown_wr(dst);
+        c_shutdown_wr(dst);
         dir.shut = true;
         c_finish_or_update(w, i);
         return;
     }
-    if n == -(tcprouter_sys::EAGAIN as i64) || n == -(tcprouter_sys::EINTR as i64) {
+    if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) {
         c_update_interest(w, i);
         return;
     }
@@ -356,11 +356,11 @@ fn c_flush(w: Worker&, i: i64, up: bool) {
     while dir.pos < dir.len {
         let buf = c_buf(w, dir.buf);
         let rest = buf[dir.pos..dir.len];
-        let n = tcprouter_sys::c_send(dst, rest[0], rest.len);
+        let n = c_send(dst, rest[0], rest.len);
         if n > 0 {
             dir.pos += n as i32;
             if up { w.c_st.bytes_in += n; } else { w.c_st.bytes_out += n; }
-        } else if n == -(tcprouter_sys::EAGAIN as i64) || n == -(tcprouter_sys::EINTR as i64) {
+        } else if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) {
             c_update_interest(w, i);                     // wait for EPOLLOUT
             return;
         } else {
@@ -375,7 +375,7 @@ fn c_flush(w: Worker&, i: i64, up: bool) {
     dir.pos = 0;
     c_give_buf(w, held);
     if dir.eof && !dir.shut {
-        tcprouter_sys::c_shutdown_wr(dst);
+        c_shutdown_wr(dst);
         dir.shut = true;
     }
     c_finish_or_update(w, i);
@@ -409,21 +409,21 @@ fn c_dispatch(w: Worker&, data: u64, events: u32) {
     let s .= w.c_slots[slot];
     if !s.live || s.gen != gen { w.c_st.stale_events++; return; }
 
-    let failed = (events & (tcprouter_sys::EPOLLERR | tcprouter_sys::EPOLLHUP)) != 0;
+    let failed = (events & (c_EPOLLERR | c_EPOLLHUP)) != 0;
     if s.state == C_CONNECTING {
         if kind == C_KIND_SERVER { c_connect_done(w, slot); }
         else if failed { c_close_conn(w, slot, CloseReason.PeerReset); }
         return;
     }
     let from_client = kind == C_KIND_CLIENT;
-    if (events & tcprouter_sys::EPOLLERR) != 0 { c_close_conn(w, slot, CloseReason.PeerReset); return; }
-    if (events & tcprouter_sys::EPOLLOUT) != 0 {
+    if (events & c_EPOLLERR) != 0 { c_close_conn(w, slot, CloseReason.PeerReset); return; }
+    if (events & c_EPOLLOUT) != 0 {
         c_flush(w, slot, !from_client);                  // client writable: finish `down`; server writable: `up`
         if !s.live { return; }
     }
-    if (events & (tcprouter_sys::EPOLLIN | tcprouter_sys::EPOLLHUP)) != 0 {
+    if (events & (c_EPOLLIN | c_EPOLLHUP)) != 0 {
         let dir .= c_dir(s, from_client);
-        if (events & tcprouter_sys::EPOLLIN) == 0 && !c_can_read(dir) {
+        if (events & c_EPOLLIN) == 0 && !c_can_read(dir) {
             c_close_conn(w, slot, CloseReason.PeerReset);    // hung up while we were not reading it
             return;
         }

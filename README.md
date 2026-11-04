@@ -29,9 +29,9 @@ Goose has no privacy and no nested namespaces, so the rule is by name, and it do
 |---|---|
 | `parse_hello`, `Config`, `Worker`, `Event`, `serve` | **Public API.** Documented in design/02 and covered by tests. |
 | `c_parse_body`, `c_Slot`, `c_slots` | **Internal.** Starts with `c_`. May change or vanish in any release; do not use. |
-| `tcprouter_sys::…` | **Internal.** The libc and C bindings (`sys.goose`, `src/c_sys.c`). |
+| `c_listen`, `c_recv`, `c_EPOLLIN` | **Internal.** The libc and C-layer bindings (`sys.goose`, `src/c_sys.c`) follow the same `c_` rule: one rule, no second namespace. |
 
-Every file declares `namespace tcprouter;` (the bindings in `sys.goose` declare `tcprouter_sys`).
+Every file declares `namespace tcprouter;`.
 Library code never reads files, environment variables or flags, never calls `abort` or `exit` because of
 anything a peer or the operating system does, and range-checks every index that comes from the kernel or
 the wire.

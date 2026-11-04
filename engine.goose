@@ -87,16 +87,16 @@ fn start(w: Worker&, cfg: Config, index: i64) -> bool {
         w.error.append(c_spawn_error);
         return false;
     }
-    w.c_epfd = tcprouter_sys::c_epoll_create();
+    w.c_epfd = c_epoll_create();
     if w.c_epfd < 0 { return c_fail(w, "epoll_create", "", -w.c_epfd); }
     for li in cfg.listeners.len {
         var p = c_Parsed { false, [0; 16], 0 };
         let text = cfg.listeners[li].addr.text;
         if !c_parse_addr(text, p) { return c_fail(w, "bad listener address", text, 22); }
-        let fd = tcprouter_sys::c_listen(p.v6, p.ip, p.port, true, 1024);
+        let fd = c_listen(p.v6, p.ip, p.port, true, 1024);
         if fd < 0 { return c_fail(w, "cannot listen on", text, -fd); }
         w.c_listen_fds[li] = fd;
-        let rc = tcprouter_sys::c_epoll_ctl(w.c_epfd, tcprouter_sys::EPOLL_CTL_ADD, fd, tcprouter_sys::EPOLLIN,
+        let rc = c_epoll_ctl(w.c_epfd, c_EPOLL_CTL_ADD, fd, c_EPOLLIN,
                                              c_pack(C_KIND_LISTENER, li, 0));
         if rc < 0 { return c_fail(w, "epoll_ctl", text, -rc); }
     }
@@ -108,16 +108,16 @@ fn start(w: Worker&, cfg: Config, index: i64) -> bool {
 // gets the worker so it can call send, close... Forward-only configs pass an empty block. (A `return`
 // in the block leaves the function that contains it: call a named function from the block.)
 fn serve<F>(w: Worker&) {
-    var events: tcprouter_sys::EpollEvent[256] = [tcprouter_sys::EpollEvent { 0, 0 }; 256];
+    var events: c_EpollEvent[256] = [c_EpollEvent { 0, 0 }; 256];
     var last_tick: i64 = 0;
     loop {
-        let n = tcprouter_sys::c_epoll_wait(w.c_epfd, events[0], 256, 100);
+        let n = c_epoll_wait(w.c_epfd, events[0], 256, 100);
         if n < 0 {
             c_pause_ms(1);                     // an unexpected epoll error: do not spin
         } else {
             for k in n { c_dispatch(w, events[k].data, events[k].events); }
         }
-        let now = tcprouter_sys::c_boottime_ms();
+        let now = c_boottime_ms();
         if now - last_tick >= 100 {
             last_tick = now;
             let tick: Event = Event.Tick { now_ms: now };
@@ -168,7 +168,7 @@ var c_spawn_error: u8[..200] = [];
 // plain socket, so a port held by another process is an error and not a silently shared port (RT-1d).
 // (Message pipes per worker join here in M4.) Returns the thread ids.
 fn spawn<W>(cfg: Config, n: i64) -> i64[>..] {
-    c_signal_fd = tcprouter_sys::c_signals_open();
+    c_signal_fd = c_signals_open();
     c_probe_listeners(cfg);
     var ids: i64[>..] = [];
     for i in n { ids.push(thread_spawn(W, cfg, i)); }
@@ -191,5 +191,5 @@ fn post(m: Message) {}                                                          
 // (RT-8c). The drain itself arrives in M4: for now it returns, which ends the process. Call it from
 // main, after spawn.
 fn wait_for_signal_then_drain(deadline_ms: i64) {
-    if c_signal_fd >= 0 { tcprouter_sys::c_signal_wait(c_signal_fd); }
+    if c_signal_fd >= 0 { c_signal_wait(c_signal_fd); }
 }
