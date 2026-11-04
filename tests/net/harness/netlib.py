@@ -43,7 +43,9 @@ class Test:
         try:
             body()
         except Exception as e:
-            self.check(False, f"{type(e).__name__}: {e}")
+            import traceback
+            where = traceback.extract_tb(e.__traceback__)[-1]
+            self.check(False, f"{type(e).__name__}: {e} (at {os.path.basename(where.filename)}:{where.lineno} in {where.name})")
 
     def finish(self):
         if self.failures:
@@ -75,6 +77,8 @@ def port_is_free(port, host="127.0.0.1"):
     finally:
         s.close()
 
+_handed_out = set()
+
 def free_port(host="127.0.0.1"):
     """A port nobody is listening on now, on both loopbacks. (A port taken by a SO_REUSEPORT listener
     would be silently shared with the proxy, so check it before use: design/06 'Steve's list'.)"""
@@ -83,7 +87,12 @@ def free_port(host="127.0.0.1"):
         s.bind((host, 0))
         port = s.getsockname()[1]
         s.close()
+        # bind(0) tends to give the same port again right after it was released, so keep a list: two tests ports must
+        # never be equal (a "refused" target that is also the proxy's own port would connect, and loop).
+        if port in _handed_out:
+            continue
         if port_is_free(port, "127.0.0.1") and (not has_ipv6() or port_is_free(port, "::1")):
+            _handed_out.add(port)
             return port
     raise RuntimeError("no free port")
 

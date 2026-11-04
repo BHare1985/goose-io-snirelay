@@ -172,7 +172,7 @@ def rt3f():
         t.check(rig.server.wait_closed("InvalidHello", lambda v: v == 1, timeout=3) == 1, f"RT-3f ... counted as InvalidHello ({rig.server.closed('InvalidHello')})")
         # A handshake that declares 20000 bytes in a small first record: also closed at once.
         c = connect(rig.port, timeout=10)
-        c.sendall(b"\x16\x03\x01\x00\x20\x01\x00\x4e\x20" + b"\x00" * 27)
+        c.sendall(b"\x16\x03\x01\x00\x20\x01\x00\x4e\x20" + b"\x00" * 28)
         c.settimeout(3)
         try:
             closed = c.recv(10) == b""
