@@ -38,6 +38,7 @@ both. Neither library knows about Gatekeeper.
 | M3 | Many workers, routing by port and SNI, retry, handler mode, `http_hello` example | RT-1b–e, RT-2, RT-3, RT-4c–e, RT-9 |
 | M4 | Timeouts, drain, tags, deadlines, messages, stats | RT-6, RT-7, RT-8, RT-10 |
 | M5 | Polish: docs, examples in CI, memory doc, scale tests | RT-2a, RT-5b/f/g, RT-11 |
+| M6 | Benchmark against the C proxy's epoll engine with Steve's method (`~/dev/c_proxy`): goal less memory and faster | RT-4f, RT-5b |
 | — | tcpproxy (doc 07), then the Goose proxy passing `verify_backends.py` | PX-…, doc 06 |
 
 The user's HTTP server for another project can start on M3.
