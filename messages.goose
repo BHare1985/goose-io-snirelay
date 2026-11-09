@@ -96,9 +96,12 @@ fn _drain_finished(w: Worker&) -> bool {
 // (a tag from Config.fenced_tags that has had no deadline yet). A tag with no entry, and tag 0, are never fenced.
 struct _TagEntry { tag: u16, until_ms: i64 }
 
+// Reads the clock itself instead of using the time the pass began: a worker can be stopped (SIGSTOP, a paused VM, a long
+// preemption) between the start of a pass and a write, and a stale time would let those writes through after the deadline
+// (RT-6a). Only tagged connections pay for the clock call.
 fn _tag_allows(w: Worker&, tag: u16) -> bool {
     if tag == 0 { return true; }
-    for e in w._tags { if e.tag == tag { return e.until_ms > w._now_ms; } }
+    for e in w._tags { if e.tag == tag { return e.until_ms > c_boottime_ms(); } }
     return true;
 }
 
