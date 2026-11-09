@@ -24,7 +24,7 @@ import std;
 import os;
 
 let MAX_HEAD = 4096;
-let CHUNK = 16384;                  // bytes of response built per send()
+let CHUNK = 32768;                  // bytes of body per send() (the engine's buffer size)
 let MAX_BODY = 67108864;            // 64 MiB, as bench/backend.c
 let PERIOD = 251;                   // body[i] = i % 251
 
@@ -123,23 +123,33 @@ fn begin_response(s: Session&, status: const u8[:], ctype: const u8[:], total: i
     s.busy = true;
 }
 
-// Builds the next piece (the head first, then body) and sends it. Stops when send() refuses; Writable continues.
+// Sends the response in pieces; stops when send() refuses (nothing of that piece was queued) and Writable continues.
+// The head and the first CHUNK - head bytes of the body go out in one send (one system call for any response that fits); the
+// rest follows in windows of CHUNK bytes sent straight from the pattern or the file, so `send`'s copy into its queue is the only one.
 fn send_pieces(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn, pattern: const u8[:]) {
-    var chunk: u8[16384] = [0; 16384];
     while s.busy {
-        var n = 0;
+        var want = 0;
+        var queued = false;
         if !s.head_sent {
-            chunk[..s.head.len].move_from(s.head[..]);
-            n = s.head.len;
-        }
-        let want = if s.total - s.offset < CHUNK - n { s.total - s.offset } else { CHUNK - n };
-        if s.file >= 0 {
-            chunk[n..n + want].move_from(FILE_BYTES[FILES[s.file].at + s.offset..FILES[s.file].at + s.offset + want]);
+            var piece: u8[>..] = [];                                // built in a growable array: not zero-filled first
+            piece.append(s.head[..]);
+            want = if s.total - s.offset < CHUNK - s.head.len { s.total - s.offset } else { CHUNK - s.head.len };
+            if s.file >= 0 {
+                piece.append(FILE_BYTES[FILES[s.file].at + s.offset..FILES[s.file].at + s.offset + want]);
+            } else {
+                piece.append(pattern[s.offset % PERIOD..s.offset % PERIOD + want]);
+            }
+            queued = w.send(conn, piece);
         } else {
-            let start = s.offset % PERIOD;                          // the pattern repeats every 251 bytes
-            chunk[n..n + want].move_from(pattern[start..start + want]);
+            want = if s.total - s.offset < CHUNK { s.total - s.offset } else { CHUNK };
+            if s.file >= 0 {
+                queued = w.send(conn, FILE_BYTES[FILES[s.file].at + s.offset..FILES[s.file].at + s.offset + want]);
+            } else {
+                let start = s.offset % PERIOD;                      // the pattern repeats every 251 bytes
+                queued = w.send(conn, pattern[start..start + want]);
+            }
         }
-        if !w.send(conn, chunk[..n + want]) { return; }            // not queued at all: try the same piece on Writable
+        if !queued { return; }                                      // nothing of that piece was queued: the same piece on Writable
         s.head_sent = true;
         s.offset += want;
         if s.offset >= s.total {
@@ -223,7 +233,7 @@ fn on_writable(w: tcprouter::Worker&, sessions: slot_pool<Session>&, pattern: co
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var sessions = slot_pool<Session> {};
     var pattern: u8[>..] = [];
-    for i in PERIOD * 140 { pattern.push((i % PERIOD) as! u8); }    // a long enough run that any 16 KiB window is a slice of it
+    for i in PERIOD * 140 { pattern.push((i % PERIOD) as! u8); }    // a long enough run that any CHUNK window is a slice of it
     var w = tcprouter::Worker { .. };
     if !w.start(cfg, index) { print(w.error); return; }
     w.serve() { w, ev =>

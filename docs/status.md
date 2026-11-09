@@ -23,7 +23,7 @@ Host for all measurements: AMD Ryzen 5 3550H (4 cores / 8 threads), Linux.
 
 [bench/RESULTS.md](../bench/RESULTS.md) has the method and the history. Against the C proxy's copy engine on the same host:
 throughput 99% to 103% in every row except new connection per request (about 91%); idle RSS 3,024 kB against 2,620 kB.
-HTTP server against the C backend: see "examples/http_server" in RESULTS.md.
+HTTP server against the C backend (wrk, same rows): 99.9% (11 B), 99.2% (new connection), 100.4% (16 KiB), 82.6% (64 KiB), 84.3% (1 MiB); see "examples/http_server" in RESULTS.md.
 
 ## Not done, and why
 

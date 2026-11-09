@@ -191,7 +191,12 @@ fn _data_delivered(w: Worker&, r: _PendingEvent) {
 // --- reading and writing for a handler connection ------------------------------------------------------------
 
 fn _handler_can_read(s: _ConnectionSlot&) -> bool {
-    !s.closing && !s.paused && !s.data_pending && !s.up.eof && !s.up.waiting
+    s._handler_wants_read() && !s.data_pending
+}
+
+// Whether the socket should be watched for input (see _update_epoll_interest).
+fn _handler_wants_read(s: _ConnectionSlot&) -> bool {
+    !s.closing && !s.paused && !s.up.eof && !s.up.waiting
 }
 
 // One read; the bytes become a Data event that keeps the buffer until the block has seen them.

@@ -230,7 +230,9 @@ fn _update_epoll_interest(w: Worker&, i: i64) {
     if !s.live { return; }
     if s.state == _STATE_HANDLING {
         var m: u32 = 0;
-        if s._handler_can_read() { m |= c_EPOLLIN; }
+        // A pending Data event does not clear EPOLLIN: serve delivers every queued event before the next epoll_wait, and
+        // _read_for_handler will not read while one is pending, so the mask change (an epoll_ctl per request, twice) would be for nothing.
+        if s._handler_wants_read() { m |= c_EPOLLIN; }
         if s.out_count > 0 { m |= c_EPOLLOUT; }
         w._set_client_interest(i, m);
         return;

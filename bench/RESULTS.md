@@ -114,3 +114,19 @@ Syscalls per request (bench/syscalls.py): 16 KiB 4.2 (C 4.2); 1 MiB 83.7 (C 69.8
 Still not parity: new connection per request (90.9%, one extra recv per connection).
 
 A shared SNI name pool (`Config.names`, routes holding an offset and length) was tried: idle RSS 3,024 -> 2,588 kB (C: 2,620). It was reverted (commit 4c05844) as not worth the loss of readability: `sni_route` had to take the config, and routes no longer carried their own name. Idle RSS stays at 3,024 kB (anonymous 984 kB), 404 kB over C's 2,620 kB.
+
+## examples/http_server against the C backend (2026-11-09; bench/run_http_server.sh, results in bench/results/http-server-*)
+
+wrk, one worker/thread each, 8 s x 3 rounds, medians, same host and method as above; `bench/backend.c` is the C keep-alive backend. Host lock taken; a Gatekeeper `gk:dev` container was present and idle.
+
+| row | C backend | Goose http_server | ratio | first run | second run |
+|---|---:|---:|---:|---:|---:|
+| 11 B keep-alive | 102,223 | 102,154 | 99.9% | 98.2% | 101.1% |
+| 11 B new connection | 13,439 | 13,332 | 99.2% | 100.1% | 101.9% |
+| 16 KiB | 68,869 | 69,143 | 100.4% | 68.9% | 68.8% |
+| 64 KiB | 30,101 | 24,875 | 82.6% | 51.6% | 77.5% |
+| 1 MiB | 2,613 | 2,203 | 84.3% | 53.3% | 70.8% |
+
+Where the time went (strace -c -f, 16 KiB, 64 connections): the C backend does 1 writev, 1 read, 1 epoll_ctl per request. The first Goose version did 2 sendto (head and body separately), 1 recvfrom, 2 epoll_ctl.
+Three changes: (1) the example copied each body through a zero-filled scratch array before `send` copied it again: windows now go straight from the pattern or file to `send`; (2) the example sent the head alone: the head and the first 32 KiB of body now go out in one `send`; (3) engine: a pending Data event no longer clears EPOLLIN on the connection (`_handler_wants_read`), which removed both epoll_ctl calls per request (the events are delivered before the next epoll_wait, so the mask change did nothing). After: 1 sendto, 1 recvfrom, 0 epoll_ctl per request.
+Still behind at 64 KiB and 1 MiB (83% and 84%): `send` copies the body into a pool buffer and the queue holds 4 buffers, so every 32 KiB window is a user-space copy and a Writable round trip; the C backend writes from a static buffer. Not tuned further (inside the 25% line); the next step would be a `send` that takes a borrowed slice, an API change for Charlie.

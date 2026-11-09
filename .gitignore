@@ -18,5 +18,3 @@ bench/backend
 bench/proxybench-*/
 tests/net/harness/handler_server
 bench/http_server
-# HTTPS termination spike: not committed, not part of v0.1.0 (the user has not allowed building external TLS code yet)
-examples/https_server/
