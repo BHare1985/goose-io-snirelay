@@ -21,6 +21,9 @@ fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool {
     if i < 0 { return false; }
     let s .= w._connection_slots[i];
     if s.closing { return false; }
+    // Under a tag nothing is sent once its deadline has passed (RT-6a-H). The clock is read here, not taken from the start of
+    // the pass: the block may have run for a long time since the pass began.
+    if !w._tag_allows(s.tag) { w._close_connection(i, CloseReason.Fenced); return false; }
     if bytes.len == 0 { return true; }
     let size = w.cfg.limits.buffer_size;
     // How many new buffers does it need, and can the queue and the pool supply them? Decide before copying anything.
@@ -232,6 +235,8 @@ fn _output_bytes(s: _ConnectionSlot&) -> i64 {
 // a send was refused and one would fit now.
 fn _flush_output(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
+    // Bytes queued before the deadline are not written after it either (the socket may take them only later).
+    if s.out_count > 0 && !w._tag_allows(s.tag) { w._close_connection(i, CloseReason.Fenced); return; }
     while s.out_count > 0 {
         let rest = w._buffer_slice(s.out_buffers[0])[s.out_pos..s.out_lengths[0]];
         let n = c_send(s.client_fd, rest[0], rest.len);

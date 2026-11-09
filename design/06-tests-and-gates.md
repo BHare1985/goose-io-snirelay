@@ -58,7 +58,7 @@ unchanged. Until then, the C proxy remains the one Gatekeeper ships.
 
 | Risk | Row |
 |---|---|
-| A frozen proxy forwards a byte past its deadline | RT-6a |
+| A frozen proxy forwards a byte past its deadline | RT-6a, RT-6a-H (handler mode) |
 | Deadline on the wrong clock (suspend) | RT-6c |
 | Retry after a client byte was consumed (the client sees garbage) | RT-4c |
 | A stale completion touches a reused slot | RT-2b |
@@ -66,3 +66,14 @@ unchanged. Until then, the C proxy remains the one Gatekeeper ships.
 | Kernel writes into memory that moved | RT-5a/doc 03 §4, O-3 |
 | `SO_REUSEPORT` port theft hides bugs | RT-1d, test rule above |
 | Drain that never ends | RT-8b |
+
+
+## The residual window of a fence (state it, do not hide it)
+
+Every write on a tagged connection, in forward mode and in handler mode, is preceded by a check of the tag's deadline against the
+clock read at that moment (not the time the loop pass began, which a stopped or slow worker leaves arbitrarily old: that was the
+RT-6a bug found after the first green run, and RT-6a-H for handler mode). What the engine cannot do is close the gap between the
+final check and the `send()` syscall: **a pause between the final deadline check and the send() syscall cannot be closed in user
+space.** A worker preempted or stopped exactly there writes its bytes after the deadline. The lease margin (1 s over the TTL for
+Gatekeeper's 3 s TTL) must cover it; the engine's part of the guarantee is that the window is those few instructions and not the
+length of a pass or of a user's handler.

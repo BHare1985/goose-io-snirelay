@@ -66,6 +66,7 @@ Columns: id · behaviour · priority · test · status.
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
 | RT-6a | Past a tag's deadline, **zero** bytes are forwarded to or from that tag's servers, also after the process was frozen (SIGSTOP) across the deadline and resumed | v1 | `deadline_test` (frozen case) | green |
+| RT-6a-H | The same guarantee in handler mode: a Handle-tagged connection is sent **zero** bytes after its tag's deadline, also when the worker is held up inside the user's block across the deadline and when the process was frozen. `send` and the output flush read the clock themselves and close the connection as Fenced | v1 | `handler_deadline_test` | green (100 runs alone, 100 under load) |
 | RT-6b | `CloseTagged(tag, gen)` closes every matching connection within one loop pass, before handling further events | v1 | `deadline_test` | green |
 | RT-6c | Deadlines are on `CLOCK_BOOTTIME` | v1 | `deadline_test` (unit, clock source) | green |
 | RT-6d | Deadlines are absolute and the latest wins: a later `until_ms` renews, an earlier or equal one is ignored, so a delayed old message or a duplicate can neither shorten nor stretch a deadline. Revoking is `CloseTagged` or a fence, never a smaller deadline | v1 | `deadline_test` | green |
@@ -111,3 +112,16 @@ Columns: id · behaviour · priority · test · status.
 | RT-11a | README with a working forward example and the HTTP example, both built by CI | v1 | `examples_test` | partly green: the examples build and http_hello runs; the README example is later |
 | RT-11b | Every public function has a comment saying what it does, who owns what, and whether it can fail | v1 | review | design |
 | RT-11c | `docs/memory.md`: what allocates and when, measured | v1 | review | design |
+
+
+## RT-12 The HTTP server example (examples/http_server.goose)
+
+The server the benchmarking guides use, and the pattern a new agent copies. Behaviour is that of `bench/backend.c`.
+
+| id | Behaviour | Ver | Test | Status |
+|---|---|---|---|---|
+| RT-12a | `GET /`, `GET /N` (N up to 64 MiB, body[i] = i % 251), `HEAD`, 404, 405, 400 and 431 are answered correctly; a worker survives all of them | v1 | `http_server_test` | design |
+| RT-12b | Keep-alive, pipelining, a head cut at every position, `Connection: close`, HTTP/1.0, a request body that arrives in pieces, case-insensitive headers | v1 | `http_server_test` | design |
+| RT-12c | 64 MiB to a slow reader arrives complete and byte-exact with the server's memory flat (send queue backpressure) | v1 | `http_server_test` | design |
+| RT-12d | `--root DIR`: every file served byte-exact with its content type; a directory is a 404 | v1 | `http_server_test` | design |
+| RT-12e | 100,000 requests from 200 keep-alive clients, every body byte-exact | v1 | `http_server_test` | design |
