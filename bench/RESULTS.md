@@ -112,3 +112,5 @@ Forwarded sockets are registered once with `EPOLLIN|EPOLLOUT|EPOLLRDHUP|EPOLLET`
 
 Syscalls per request (bench/syscalls.py): 16 KiB 4.2 (C 4.2); 1 MiB 83.7 (C 69.8); new connection 16.4 (C 15.4: epoll_ctl 2.0 vs 2.0, one more recv: our read that sees the second EOF). Correctness: bench verify passes for all configs. Tests: all 21 files green, backpressure/forward/chaos/memory/sni_forward 8 runs each clean.
 Still not parity: new connection per request (90.9%, one extra recv per connection).
+
+A shared SNI name pool (`Config.names`, routes holding an offset and length) was tried: idle RSS 3,024 -> 2,588 kB (C: 2,620). It was reverted (commit 4c05844) as not worth the loss of readability: `sni_route` had to take the config, and routes no longer carried their own name. Idle RSS stays at 3,024 kB (anonymous 984 kB), 404 kB over C's 2,620 kB.
