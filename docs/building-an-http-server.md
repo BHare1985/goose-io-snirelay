@@ -93,12 +93,20 @@ Three ways, in order of how much is verified today:
 
 1. **TLS passthrough / routing by name, nothing decrypted: works and is tested** (RT-3). Put tcprouter in front of any TLS
    server: `examples/sni_router.goose` routes by the server name in the ClientHello and forwards the bytes untouched.
-   `examples/https_server` is not needed for this.
 2. **Plain HTTP behind a TLS terminator** (nginx, stunnel, HAProxy): `http_server` is the backend.
-3. **TLS terminated inside your handler**: possible because a TLS engine written sans-I/O is four byte streams (ciphertext in,
-   plaintext out, plaintext in, ciphertext out), which map onto `Data` and `send`. **Not verified in this repository yet.**
-   The candidates and their status are in the HTTPS section of [docs/status.md](status.md). Keep the TLS library out of the
-   tcprouter core: it belongs in your program's own `.build` (see `examples/https_server/`).
+3. **TLS terminated inside your handler, with gslib's sans-I/O TLS.** A TLS engine written sans-I/O is four byte streams (ciphertext in,
+   plaintext out, plaintext in, ciphertext out), which map onto `Data` and `send`. The support check
+   ([docs/tls-support.md](tls-support.md), `tests/net/harness/tls_server.goose`) shows TLS 1.2 and 1.3 handshakes, HTTP/1.1 keep-alive, SNI,
+   backpressure, a peer that hangs up and the deadline fence working on handler mode. There is **no finished HTTPS server in v0.1.0**, and what
+   it does not cover matters:
+   * **A graceful TLS close is not supported yet.** The TLS library asks for shutdown-write, read-and-drop until the peer closes or a timeout,
+     then close; tcprouter's `close` has no such mode (engine item G-1, after v0.1.0). Closing with unread data can reset the connection before the
+     peer has read the alert.
+   * **About 300 kB of memory per open TLS session** (measured: 200 sessions, 6,048 to 64,492 kB). The RT-2a figure of 10,000 idle connections
+     per worker, at 169 bytes each, is for **plain** connections only.
+   * Each `Data` event's bytes are copied once before they go to the TLS engine (candidate engine change F-2, not made).
+   * Keep the TLS library out of the tcprouter core. gslib is fetched by the compiler, pinned to a commit, never vendored here; its licence is
+     unstated (open question O-9).
 
 ## Testing and benchmarking your server
 
