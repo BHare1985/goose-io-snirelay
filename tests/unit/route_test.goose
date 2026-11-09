@@ -43,10 +43,14 @@ fn add(cfg: tcprouter::Config&, listener: u16, on: tcprouter::Match) {
 }
 
 fn row_sni(cfg: tcprouter::Config&, listener: u16, name: const u8[:]) {
-    cfg.routes.push(tcprouter::sni_route(cfg, listener, name, tcprouter::Action.Close));
+    var m = tcprouter::Match.Sni { name: [] };
+    m.name.append(name);
+    add(cfg, listener, m);
 }
 fn row_suffix(cfg: tcprouter::Config&, listener: u16, name: const u8[:]) {
-    cfg.routes.push(tcprouter::sni_suffix_route(cfg, listener, name, tcprouter::Action.Close));
+    var m = tcprouter::Match.SniSuffix { name: [] };
+    m.name.append(name);
+    add(cfg, listener, m);
 }
 fn row_no_sni(cfg: tcprouter::Config&, listener: u16) { add(cfg, listener, tcprouter::Match.NoSni); }
 fn row_any(cfg: tcprouter::Config&, listener: u16) { add(cfg, listener, tcprouter::Match.Any); }
@@ -146,13 +150,13 @@ fn test_suffix() {
 fn test_suffix_helper() {
     var cfg = tcprouter::Config { .. };
     listener(cfg, 1, tcprouter::Inspect.Sni);
-    cfg.routes.push(tcprouter::sni_suffix_route(cfg, 1, "*.example.com", tcprouter::Action.Close));   // 0
-    cfg.routes.push(tcprouter::sni_suffix_route(cfg, 1, "other.org", tcprouter::Action.Close));       // 1: bare form also fine
+    cfg.routes.push(tcprouter::sni_suffix_route(1, "*.example.com", tcprouter::Action.Close));   // 0
+    cfg.routes.push(tcprouter::sni_suffix_route(1, "other.org", tcprouter::Action.Close));       // 1: bare form also fine
     check(which(cfg, 1, found("a.example.com")) == 0, "B1 '*.example.com' matches a name below it");
     check(which(cfg, 1, found("example.com")) == -1, "B1 '*.example.com' does not match the apex");
     check(which(cfg, 1, found("x.other.org")) == 1, "B1 the bare form 'other.org' works the same");
     var stored = false;
-    match cfg.routes[0].on { SniSuffix s => { stored = tcprouter::name_text(cfg, s.at, s.len) == "example.com"; }, _ => {} }
+    match cfg.routes[0].on { SniSuffix s => { stored = s.name == "example.com"; }, _ => {} }
     check(stored, "B1 the stored form has no star");
 }
 

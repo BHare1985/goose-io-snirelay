@@ -282,8 +282,8 @@ fn main() {
             var t = tcprouter::Target { addrs: [] };
             each_split(targets, ',') { t.addrs.push(tcprouter::addr(it)); };
             let action = tcprouter::Action.Forward { to: tcprouter::add_target(cfg, t) };
-            if kind == "sni" { cfg.routes.push(tcprouter::sni_route(cfg, id, name, action)); }
-            else if kind == "suffix" { cfg.routes.push(tcprouter::sni_suffix_route(cfg, id, name, action)); }
+            if kind == "sni" { cfg.routes.push(tcprouter::sni_route(id, name, action)); }
+            else if kind == "suffix" { cfg.routes.push(tcprouter::sni_suffix_route(id, name, action)); }
             else if kind == "none" { cfg.routes.push(tcprouter::Route { listener: id, on: tcprouter::Match.NoSni, action: action }); }
             else { cfg.routes.push(tcprouter::any_route(id, action)); }
         }

@@ -44,7 +44,7 @@ fn _route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -> cons
     for &r in cfg.routes {
         if r.listener != listener { continue; }
         match r.on {
-            Sni s => { if _same_host_name(name_text(cfg, s.at, s.len), name) { return r; } },
+            Sni s => { if _same_host_name(s.name, name) { return r; } },
             _ => {},
         }
     }
@@ -54,7 +54,7 @@ fn _route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -> cons
         if r.listener != listener { continue; }
         match r.on {
             SniSuffix s => {
-                let suffix = _trim_trailing_dot(name_text(cfg, s.at, s.len));
+                let suffix = _trim_trailing_dot(s.name);
                 if suffix.len > best_len && _is_below_suffix(name, suffix) {
                     best .= r;
                     best_len = suffix.len;
