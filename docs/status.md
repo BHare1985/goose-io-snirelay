@@ -27,10 +27,10 @@ HTTP server against the C backend (wrk, same rows): 99.9% (11 B), 99.2% (new con
 
 ## Not done, and why
 
-* **HTTPS termination: not available in v0.1.0.** What works is SNI passthrough: the router reads the server name from the ClientHello and forwards
-  the encrypted bytes. Terminating TLS needs a TLS engine; a spike with BearSSL (MIT licence, TLS 1.2 only) was started and not built, because
-  that needs C code from outside this repository. Nothing about it is committed. If it is built later it will be an optional package with its
-  own `.build`, the core stays free of a TLS library, and the guide will say TLS 1.2 only.
+* **HTTPS termination: not in v0.1.0.** What works is SNI passthrough (the router reads the server name from the ClientHello and forwards the encrypted
+  bytes). Termination will use gslib's sans-I/O TLS (the user's decision); [docs/tls-support.md](tls-support.md) is the support check: TLS 1.2 and 1.3
+  handshakes, HTTP/1.1 keep-alive, SNI, backpressure, close and fence all work on handler mode; three gaps are listed there. gslib's licence is
+  unstated (design/09 O-9 stays open) and it is not vendored. No HTTPS server is shipped.
 * **Policy hook and the Gatekeeper proxy (`tcpproxy`)**: backup tiers, first-up, passive failure skip, the control protocol. After this release
   ([design/07](../design/07-tcpproxy.md), [docs/gatekeeper-next-step.md](gatekeeper-next-step.md)).
 * splice forwarding (RT-4g, v2) and a `bench/compare.sh` harness (RT-4f, v2; the numbers above come from `bench/run_m6.sh`).
