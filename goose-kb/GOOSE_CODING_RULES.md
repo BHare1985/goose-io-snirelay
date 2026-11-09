@@ -16,6 +16,10 @@ conventions I recommend, not language requirements.
 10. **Define libc constants/structs yourself, with exact C layout**, and verify size with `bytes_of`. [V]
 
 ## SHOULD
+- Call functions as methods: `w.pump(i)`, `s.direction_of(up)` (UFCS finds `fn pump(w: Worker&, i: i64)` in the receiver type's namespace). Plain `pump(w, i)` is not the author's style. [D][V]
+- Write short functions as one tail expression (`fn area(s: Shape.Rect) -> f64 { s.w * s.h }`); `return` only for early exits. [D][V]
+- One behaviour per enum variant: case functions (overloads on `Shape.Circle`...) or a `match`; both are exhaustive. [D]
+- State used by one function and its helpers: nested functions over locals. State spread over files: a `root struct` plus UFCS functions. [D]
 - Default to `T[>..]` for builders/arenas; `T[..N]` for strings/buffers inside structs; fixed `T[N]` for I/O scratch. [D]
 - Prefer `T?` returns for "found or not" and a trailing `bool` for two-outcome calls; `return … from` for deep parse failures. [D]
 - Use `slot_pool<T>` for objects freed in arbitrary order (connections); keep indices as `u32` for epoll data. [V t04]

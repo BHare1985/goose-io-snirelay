@@ -244,6 +244,6 @@ benchmarks, so tcprouter does not carry a second engine.
   handler, so it runs before the events of the same pass (RT-6b).
 - **Stats across workers.** `Message.Stats` makes each worker `qput` a `_StatsReply { worker, stats }`; `gather_stats(workers)` posts one
   and adds up that many replies (one caller at a time: the replies share a queue). Sessions per tag are counted by walking the slots when
-  `stats(w)` is called, not kept up to date.
+  `w.stats()` is called, not kept up to date.
 - **Measured:** message_test 13 of 13 (exact sums over 4 workers, 390 connections); deadline_test 35 of 35 including the SIGSTOP/SIGCONT case
   with traffic in both directions.

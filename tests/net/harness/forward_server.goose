@@ -66,7 +66,7 @@ fn number(text: const u8[:], what: const u8[:]) -> i64 {
 // --- one worker -----------------------------------------------------------------------------------------
 
 fn print_stats(w: tcprouter::Worker&, index: i64) {
-    let s = tcprouter::stats(w);
+    let s = w.stats();
     var line: u8[>..] = [];
     format(line, "STAT ", index, " accepted=", s.accepted, " open=", s.open,
            " bytes_in=", s.bytes_in, " bytes_out=", s.bytes_out,
@@ -94,7 +94,7 @@ fn on_event(w: tcprouter::Worker&, ev: tcprouter::Event, index: i64, every_ms: i
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var w = tcprouter::Worker { .. };
-    if !tcprouter::start(w, cfg, index) {
+    if !w.start(cfg, index) {
         write_stderr(str("forward_server: worker ", index, ": ", w.error, "\n"));
         qput(Started { worker: index, ok: false });
         return;
@@ -103,7 +103,7 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
     print("READY ", index);
     var last: i64 = 0;
     let every_ms = STAT_MS;
-    tcprouter::serve(w) { w, ev => on_event(w, ev, index, every_ms, last); };
+    w.serve() { w, ev => on_event(w, ev, index, every_ms, last); };
 }
 
 // One line with the whole program's counters, as gather_stats summed them.

@@ -16,7 +16,7 @@ and read with `match ev { Opened o => o.conn, … }`; there is no `switch`, `whi
 1. **No stored callbacks.** Function values are compile-time only; a block passed to a function
    can't be kept for later [D]. So `router.add_sni_route("api") { conn => … }` from the user's
    draft can't register a handler. Instead, **routes are data**, and your code runs inside one
-   block that the worker loop calls for every event: `serve(w) { w, ev => … }`.
+   block that the worker loop calls for every event: `w.serve() { w, ev => … }`.
 2. **No coroutines.** A read loop per connection (`while stream.is_open() { stream.read(…) }`)
    needs a thread per connection, capped near 8k by Goose's per-thread stacks [V, goose-kb].
    So handler code is **event-driven**: it is called on open, on data, when writable, on close.
@@ -88,11 +88,11 @@ import tcprouter from "github.com/bhare1985/tcprouter@v0";
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var w = tcprouter::Worker { .. };               // a root struct: created where it lives
-    if !tcprouter::start(w, cfg, index) {           // binds this worker's listeners (SO_REUSEPORT)
+    if !w.start(cfg, index) {           // binds this worker's listeners (SO_REUSEPORT)
         print("worker ", index, ": ", w.error);     // names the address and errno; never an abort
         return;
     }
-    tcprouter::serve(w) { w, ev => };               // forward-only config: nothing to handle
+    w.serve() { w, ev => };               // forward-only config: nothing to handle
 }
 
 fn main() {
@@ -150,7 +150,7 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool        // hand the conn to t
 ```
 
 - **Your per-connection state** lives in your own `slot_pool`. On `Opened`, allocate from it and
-  `set_user(w, c, index)`; every later event carries that `user` (a `slot_pool` picks its own index,
+  `w.set_user(c, index)`; every later event carries that `user` (a `slot_pool` picks its own index,
   so the engine's `c.slot` can't key yours). tcprouter never stores your state, only the u32.
   Per-connection growable state can't be a pool element (resizable elements are rejected [V]): use
   `u8[..N]` or a `slice_pool` run. Check a `user` id against the pool's length before indexing.
@@ -172,8 +172,8 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool        // hand the conn to t
 - **The `return` trap** (also in the README): a `return` inside the block leaves the function that
   contains the block, here the whole worker. Never put logic inline in the block.
   ```goose
-  tcprouter::serve(w) { w, ev => if bad { return; } };     // WRONG: ends the worker
-  tcprouter::serve(w) { w, ev => on_event(w, ev); };       // right: a named handler function
+  w.serve() { w, ev => if bad { return; } };     // WRONG: ends the worker
+  w.serve() { w, ev => on_event(w, ev); };       // right: a named handler function
   ```
 - **`Data` is a view** into the engine's buffer. It is gone after your block returns (Goose
   enforces this [D]).
@@ -204,8 +204,8 @@ is tcpproxy (doc 07), plugged in at compile time. Verified to work [V m0 O-1]: t
 ```goose
 var w = tcprouter::Worker { .. };
 var p = tcpproxy::policy(proxy_cfg, index);        // a root struct too, if it owns several tables
-if !tcprouter::start(w, cfg, index) { return; }
-tcprouter::serve(w, p) { w, ev => };               // the engine calls p's functions; see doc 07
+if !w.start(cfg, index) { return; }
+w.serve(p) { w, ev => };               // the engine calls p's functions; see doc 07
 ```
 
 ## 5b. Stats of a worker

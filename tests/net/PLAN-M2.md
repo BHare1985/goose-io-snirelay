@@ -81,7 +81,7 @@ client gets "connection refused". The tests fail at their first connect, for the
 
 ## Questions for Charlie
 
-1. May I add the public `stats(w)` snapshot (above) now rather than in M4? Its fields are the ones doc 03 §9 lists.
+1. May I add the public `w.stats()` snapshot (above) now rather than in M4? Its fields are the ones doc 03 §9 lists.
 2. Python drivers: OK? (goose-kb's t02_test.py did the same; the alternative, a Goose client program, would need
    its own threads and a hash function, and tells us less than an independent client.)
 3. RT-5b appears in the M2 list (5a-d) and in the M5 list of design/README.md. I plan it for M2 as the last test, as it only needs

@@ -67,14 +67,14 @@ fn stats(w: Worker&) -> Stats {
             if !found && s.tags.len < s.tags.cap { s.tags.push(TagSessions { tag: slot.tag, open: 1 }); }
         }
     }
-    return s;
+    s
 }
 
 // --- the worker ---------------------------------------------------------------------------------
 
 // One event loop and everything it owns. A root struct: create it where it lives, then start it.
 //     var w = tcprouter::Worker { .. };
-//     if !tcprouter::start(w, cfg, index) { print(w.error); return; }
+//     if !w.start(cfg, index) { print(w.error); return; }
 // Fields starting with `c_` are internal (README: naming rule).
 root struct Worker {
     error: u8[..200] = [],             // why start() returned false
@@ -117,7 +117,7 @@ fn start(w: Worker&, cfg: const Config&, index: i64) -> bool {
         return false;
     }
     w._epoll_fd = c_epoll_create();
-    if w._epoll_fd < 0 { return _fail_start(w, "epoll_create", "", -w._epoll_fd); }
+    if w._epoll_fd < 0 { return w._fail_start("epoll_create", "", -w._epoll_fd); }
     if index < _worker_count {                              // spawn() made one pipe per worker
         w._message_fd = _message_read_fds[index];
         c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, w._message_fd, c_EPOLLIN, _pack_event_data(_EVENT_KIND_MESSAGE, 0, 0));
@@ -126,15 +126,15 @@ fn start(w: Worker&, cfg: const Config&, index: i64) -> bool {
     for li in cfg.listeners.len {
         var p = _ParsedAddress { false, [0; 16], 0 };
         let text = cfg.listeners[li].addr.text;
-        if !_parse_address(text, p) { return _fail_start(w, "bad listener address", text, 22); }
+        if !_parse_address(text, p) { return w._fail_start("bad listener address", text, 22); }
         let fd = c_listen(p.v6, p.ip, p.port, true, 1024);
-        if fd < 0 { return _fail_start(w, "cannot listen on", text, -fd); }
+        if fd < 0 { return w._fail_start("cannot listen on", text, -fd); }
         w._listen_fds[li] = fd;
         let rc = c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, fd, c_EPOLLIN,
                                              _pack_event_data(_EVENT_KIND_LISTENER, li, 0));
-        if rc < 0 { return _fail_start(w, "epoll_ctl", text, -rc); }
+        if rc < 0 { return w._fail_start("epoll_ctl", text, -rc); }
     }
-    return true;
+    true
 }
 
 // Runs the loop until the worker has drained or been stopped (M4), calling your block once per
@@ -150,27 +150,27 @@ fn serve<F>(w: Worker&) {
         let n = c_epoll_wait(w._epoll_fd, events[0], 256, wait_ms);
         w._now_ms = c_boottime_ms();
         // Messages first, then deadlines, then events: a drain or a fence must not be outrun by traffic in the same pass.
-        if n > 0 { for k in n { if (events[k].data & 0xff) == _EVENT_KIND_MESSAGE { _read_messages(w); } } }
-        _enforce_deadlines(w);
+        if n > 0 { for k in n { if (events[k].data & 0xff) == _EVENT_KIND_MESSAGE { w._read_messages(); } } }
+        w._enforce_deadlines();
         if n < 0 {
             _pause_milliseconds(1);                     // an unexpected epoll error: do not spin
         } else {
-            for k in n { if (events[k].data & 0xff) != _EVENT_KIND_MESSAGE { _dispatch_event(w, events[k].data, events[k].events); } }
+            for k in n { if (events[k].data & 0xff) != _EVENT_KIND_MESSAGE { w._dispatch_event(events[k].data, events[k].events); } }
         }
-        _run_ready(w);
-        _deliver_events(w, F);
-        if _drain_finished(w) { _deliver_events(w, F); return; }
+        w._run_ready();
+        w._deliver_events(F);
+        if w._drain_finished() { w._deliver_events(F); return; }
         let now = w._now_ms;
-        _resume_paused_listeners(w, now);
+        w._resume_paused_listeners(now);
         if now - last_sweep >= 250 {
             last_sweep = now;
-            _sweep_timeouts(w, now);
+            w._sweep_timeouts(now);
         }
         if now - last_tick >= 100 {
             last_tick = now;
             let tick: Event = Event.Tick { now_ms: now };
             F(w, tick);
-            _deliver_events(w, F);
+            w._deliver_events(F);
         }
     }
 }
@@ -208,11 +208,11 @@ fn spawn<W>(cfg: const Config&, n: i64) -> i64[>..] {
         _worker_ids[i] = thread_spawn(W, cfg, i);
         ids.push(_worker_ids[i]);
     }
-    return ids;
+    ids
 }
 
 // A sensible default for the number of workers: the CPUs this process may use.
-fn cpu_count() -> i64 { return hardware_threads(); }
+fn cpu_count() -> i64 { hardware_threads() }
 
 enum Message {
     Drain { deadline_ms: i64 },

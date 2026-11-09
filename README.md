@@ -29,7 +29,7 @@ tell the API from the machinery at a glance, names carry a marker, and the rule 
 | Name looks like | Meaning |
 |---|---|
 | `parse_hello`, `Config`, `Worker`, `Event`, `serve` | **Public API.** Documented in design/02 and covered by tests. |
-| `_close_connection`, `_ConnectionSlot`, `_STATE_FORWARDING`, `_connection_slots` | **Private.** A leading underscore, then the name spelled out in full. May change or vanish in any release; do not use. (The underscore is a convention, not enforcement: nothing stops `tcprouter::_close_connection`.) |
+| `_close_connection`, `_ConnectionSlot`, `_STATE_FORWARDING`, `_connection_slots` | **Private.** A leading underscore, then the name spelled out in full. May change or vanish in any release; do not use. (The underscore is this project's convention, not the language's: Goose has no privacy, and its own standard library uses no underscore names. Nothing stops `tcprouter::_close_connection`.) Functions are written as methods, `w._close_connection(i)`, because Goose resolves `x.f()` in the namespace of `x`'s type. |
 | `c_listen`, `c_epoll_wait`, `c_EpollEvent`, `c_EAGAIN` | **Comes from C.** The functions in `src/c_sys.c` and their declarations in `sys.goose` (same names, no renaming), plus the constants and structs that mirror C's. A `c_` name at a call site tells you the call leaves Goose. |
 
 Every file declares `namespace tcprouter;`.
@@ -42,8 +42,8 @@ from the block. Never put logic inline in the block: call a named function, as `
 does.
 
 ```goose
-tcprouter::serve(w) { w, ev => if bad { return; } };      // WRONG: leaves the whole worker
-tcprouter::serve(w) { w, ev => on_event(w, ev); };        // right: the logic is a function of its own
+w.serve() { w, ev => if bad { return; } };      // WRONG: leaves the whole worker
+w.serve() { w, ev => on_event(w, ev); };        // right: the logic is a function of its own
 ```
 
 ## Tests

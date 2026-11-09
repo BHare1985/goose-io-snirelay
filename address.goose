@@ -29,7 +29,7 @@ fn _parse_address(text: const u8[:], out: _ParsedAddress&) -> bool {
         out.v6 = false;
         if !_parse_ipv4(host, out.ip) { return false; }
     }
-    return _parse_port(port, out.port);
+    _parse_port(port, out.port)
 }
 
 // Internal: 1 to 5 decimal digits, 1..65535.
@@ -42,7 +42,7 @@ fn _parse_port(text: const u8[:], out: u16&) -> bool {
     }
     if n < 1 || n > 65535 { return false; }
     out = n as u16;
-    return true;
+    true
 }
 
 // Internal: a.b.c.d, each 0..255, 1 to 3 digits, no leading zeros (they look like octal).
@@ -67,14 +67,14 @@ fn _parse_ipv4(text: const u8[:], out: u8[16]&) -> bool {
             if digits > 3 || value > 255 { return false; }
         }
     }
-    return part == 4;
+    part == 4
 }
 
 fn _hex_digit_value(c: u8) -> i64 {
     if c >= '0' && c <= '9' { return c - '0'; }
     if c >= 'a' && c <= 'f' { return c - 'a' + 10; }
     if c >= 'A' && c <= 'F' { return c - 'A' + 10; }
-    return -1;
+    -1
 }
 
 // Internal: colon-hex groups of 1 to 4 digits, at most one "::" standing for one or more zero groups.
@@ -135,5 +135,5 @@ fn _parse_ipv6(text: const u8[:], out: u8[16]&) -> bool {
         out[g * 2] = (groups[g] >> 8) as u8;
         out[g * 2 + 1] = groups[g] as! u8;          // the low byte: truncation is the point
     }
-    return true;
+    true
 }

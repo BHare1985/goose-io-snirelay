@@ -16,7 +16,7 @@ fn addr(text: const u8[:]) -> Addr {
     } else {
         a.text.append(text);
     }
-    return a;
+    a
 }
 
 // Where a connection's bytes go when the engine forwards them: tried in order, rotating the
@@ -31,7 +31,7 @@ fn target(names: const u8[:][:]) -> Target {
     for n in names {
         if t.addrs.len == t.addrs.cap { t.too_many = true; } else { t.addrs.push(addr(n)); }
     }
-    return t;
+    t
 }
 
 // None: route by listener only. Sni: wait for the TLS ClientHello and route by server name.
@@ -84,7 +84,7 @@ let _NO_TARGET: u16 = 65535;
 fn add_target(cfg: Config&, t: Target) -> u16 {
     if cfg.targets.len == cfg.targets.cap { return _NO_TARGET; }
     cfg.targets.push(t);
-    return (cfg.targets.len - 1) as u16;
+    (cfg.targets.len - 1) as u16
 }
 
 // Route constructors, so a config reads like a table.
@@ -96,11 +96,11 @@ fn sni_route(listener: u16, name: const u8[:], action: Action) -> Route {
     } else {
         n.name.append(name);
     }
-    return Route { listener: listener, on: n, action: action };
+    Route { listener: listener, on: n, action: action }
 }
 
 fn any_route(listener: u16, action: Action) -> Route {
-    return Route { listener: listener, on: Match.Any, action: action };
+    Route { listener: listener, on: Match.Any, action: action }
 }
 
 // A SniSuffix route. Users type "*.example.com" (as on a wildcard certificate), the stored form is the
@@ -115,5 +115,5 @@ fn sni_suffix_route(listener: u16, name: const u8[:], action: Action) -> Route {
     } else {
         n.name.append(bare);
     }
-    return Route { listener: listener, on: n, action: action };
+    Route { listener: listener, on: n, action: action }
 }

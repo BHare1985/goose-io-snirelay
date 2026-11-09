@@ -7,8 +7,8 @@ import tcprouter from "..";
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var w = tcprouter::Worker { .. };
-    if !tcprouter::start(w, cfg, index) { print(w.error); return; }
-    tcprouter::serve(w) { w, ev => };
+    if !w.start(cfg, index) { print(w.error); return; }
+    w.serve() { w, ev => };
 }
 
 fn main() {

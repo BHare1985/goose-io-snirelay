@@ -63,10 +63,10 @@ fn _read_messages(w: Worker&) {
         let gen, ok3 = binary::read_u32le(r);
         let value, ok4 = binary::read_i64le(r);
         if !ok || !ok2 || !ok3 || !ok4 { continue; }
-        if kind == _MESSAGE_DRAIN { _begin_drain(w, value); }
-        else if kind == _MESSAGE_DEADLINE { _set_deadline(w, tag, value); }
-        else if kind == _MESSAGE_CLOSE_TAGGED { _close_tagged(w, tag, gen); }
-        else if kind == _MESSAGE_STATS { qput(_StatsReply { worker: w.index, stats: stats(w) }); }
+        if kind == _MESSAGE_DRAIN { w._begin_drain(value); }
+        else if kind == _MESSAGE_DEADLINE { w._set_deadline(tag, value); }
+        else if kind == _MESSAGE_CLOSE_TAGGED { w._close_tagged(tag, gen); }
+        else if kind == _MESSAGE_STATS { qput(_StatsReply { worker: w.index, stats: w.stats() }); }
     }
 }
 
@@ -85,9 +85,9 @@ fn _begin_drain(w: Worker&, deadline_ms: i64) {
 fn _drain_finished(w: Worker&) -> bool {
     if !w._draining { return false; }
     if w._stats.open > 0 && w._now_ms >= w._drain_deadline_ms {
-        for i in w._connection_slots.len { _close_connection(w, i, CloseReason.Drained); }
+        for i in w._connection_slots.len { w._close_connection(i, CloseReason.Drained); }
     }
-    return w._stats.open == 0;
+    w._stats.open == 0
 }
 
 // --- tags, deadlines and fences (RT-6) -----------------------------------------------------------------------------------
@@ -102,7 +102,7 @@ struct _TagEntry { tag: u16, until_ms: i64 }
 fn _tag_allows(w: Worker&, tag: u16) -> bool {
     if tag == 0 { return true; }
     for e in w._tags { if e.tag == tag { return e.until_ms > c_boottime_ms(); } }
-    return true;
+    true
 }
 
 // The latest deadline wins: a later one renews, an earlier or equal one (a delayed or duplicate message) changes nothing.
@@ -119,7 +119,7 @@ fn _set_deadline(w: Worker&, tag: u16, until_ms: i64) {
 fn _close_tagged(w: Worker&, tag: u16, gen: u32) {
     for i in w._connection_slots.len {
         let s .= w._connection_slots[i];
-        if s.live && s.tag == tag && s.target_gen <= gen { _close_connection(w, i, CloseReason.Fenced); }
+        if s.live && s.tag == tag && s.target_gen <= gen { w._close_connection(i, CloseReason.Fenced); }
     }
 }
 
@@ -134,7 +134,7 @@ fn _enforce_deadlines(w: Worker&) {
     w._deadline_scan_at = next;
     for i in w._connection_slots.len {
         let s .= w._connection_slots[i];
-        if s.live && !_tag_allows(w, s.tag) { _close_connection(w, i, CloseReason.Fenced); }
+        if s.live && !w._tag_allows(s.tag) { w._close_connection(i, CloseReason.Fenced); }
     }
 }
 
@@ -162,5 +162,5 @@ fn gather_stats(workers: i64) -> Stats {
     post(Message.Stats { reply_to: 1 });
     var total = Stats { .. };
     for k in workers { _add_stats(total, qget<_StatsReply>().stats); }
-    return total;
+    total
 }

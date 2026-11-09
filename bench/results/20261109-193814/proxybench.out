@@ -1,0 +1,119 @@
+waiting for host lock...
+>> building
+>> layout: proxy cpus=[0] backend cpus=[2, 3] (2 thr) wrk cpus=[4, 5, 6, 7] (4 thr)
+>> workers: 1 -> proxy.c 1, nginx 1, haproxy 1; backend=builtin (2)
+>> configs: direct epoll_copy epoll_hybrid goose
+>> L2/core=512 KiB;  perf: no
+   note: goose: 1 x '/home/bhare/dev/tcprouter/bench/forward_server --listen 127.0.0.1:18447 --to 127.0.0.1:18080 --workers 1 --stat-ms 3600000' on port 18447
+   note: 6 CPU vulnerability mitigations active (spectre_v2, vmscape, spec_store_bypass, spectre_v1, retbleed, spec_rstack_overflow): syscalls and kernel entry cost more; 'mitigations=off' on the kernel command line (reboot, less secure) helps every proxy, most those making the most syscalls
+>> 36 runs, ETA ~7 min. Leave the machine idle.
+>> correctness check (data integrity, ordering, half-close, slow readers; web mix through every config)
+   direct           PASS  (mix)
+   epoll_copy       PASS  (mix + verify)
+   epoll_hybrid     PASS  (mix + verify)
+   goose            PASS  (mix + verify)
+         11B c=64  new r1 direct               46441 req/s  p99=   1.22ms  wrk= 99%  3678MHz 55C
+         11B c=64  new r1 epoll_copy           10494 req/s  p99=   6.47ms  wrk= 25%  3661MHz 53C
+         11B c=64  new r1 epoll_hybrid         10522 req/s  p99=   6.58ms  wrk= 23%  3651MHz 49C
+         11B c=64  new r1 goose                 9555 req/s  p99=   8.87ms  wrk= 23%  3677MHz 50C
+         11B c=64  new r2 epoll_copy           10464 req/s  p99=   8.23ms  wrk= 27%  3624MHz 50C
+         11B c=64  new r2 epoll_hybrid         10650 req/s  p99=   6.45ms  wrk= 28%  3689MHz 50C
+         11B c=64  new r2 goose                 9639 req/s  p99=   7.08ms  wrk= 22%  3693MHz 50C
+         11B c=64  new r2 direct               46501 req/s  p99=   1.22ms  wrk= 99%  3692MHz 59C
+         11B c=64  new r3 epoll_hybrid         10621 req/s  p99=   6.74ms  wrk= 24%  3688MHz 56C
+         11B c=64  new r3 goose                 9631 req/s  p99=   7.66ms  wrk= 24%  3690MHz 52C
+         11B c=64  new r3 direct               46362 req/s  p99=   1.23ms  wrk= 99%  3682MHz 60C
+         11B c=64  new r3 epoll_copy           10682 req/s  p99=   7.54ms  wrk= 32%  3689MHz 58C
+      16384B c=64      r1 direct              130803 req/s  p99=   1.10ms  wrk= 61%  3693MHz 57C
+      16384B c=64      r1 epoll_copy           43605 req/s  p99=   1.90ms  wrk= 50%  3683MHz 55C
+      16384B c=64      r1 epoll_hybrid         47647 req/s  p99=   1.73ms  wrk= 55%  3691MHz 55C
+      16384B c=64      r1 goose                43568 req/s  p99=   1.87ms  wrk= 50%  3679MHz 55C
+      16384B c=64      r2 epoll_copy           43303 req/s  p99=   1.93ms  wrk= 51%  3680MHz 55C
+      16384B c=64      r2 epoll_hybrid         46868 req/s  p99=   1.83ms  wrk= 54%  3691MHz 56C
+      16384B c=64      r2 goose                43683 req/s  p99=   1.81ms  wrk= 51%  3691MHz 56C
+      16384B c=64      r2 direct              130825 req/s  p99=   1.22ms  wrk= 60%  3677MHz 58C
+      16384B c=64      r3 epoll_hybrid         47327 req/s  p99=   1.76ms  wrk= 53%  3680MHz 56C
+      16384B c=64      r3 goose                43825 req/s  p99=   1.89ms  wrk= 51%  3691MHz 56C
+      16384B c=64      r3 direct              130828 req/s  p99=   0.95ms  wrk= 60%  3692MHz 58C
+      16384B c=64      r3 epoll_copy           43442 req/s  p99=   2.26ms  wrk= 51%  3677MHz 56C
+    1048576B c=16      r1 direct                4878 req/s  p99=   6.02ms  wrk= 55%  3691MHz 64C
+    1048576B c=16      r1 epoll_copy            1541 req/s  p99=  12.66ms  wrk= 32%  3691MHz 56C
+    1048576B c=16      r1 epoll_hybrid          5079 req/s  p99=   5.67ms  wrk= 55%  3664MHz 63C
+    1048576B c=16      r1 goose                 1468 req/s  p99=  13.59ms  wrk= 34%  3685MHz 60C
+    1048576B c=16      r2 epoll_copy            1428 req/s  p99=  13.05ms  wrk= 30%  3681MHz 56C
+    1048576B c=16      r2 epoll_hybrid          5084 req/s  p99=   7.09ms  wrk= 55%  3673MHz 64C
+    1048576B c=16      r2 goose                 1401 req/s  p99=  14.39ms  wrk= 33%  3684MHz 61C
+    1048576B c=16      r2 direct                4881 req/s  p99=   6.69ms  wrk= 55%  3678MHz 57C
+    1048576B c=16      r3 epoll_hybrid          5074 req/s  p99=   6.07ms  wrk= 54%  3691MHz 65C
+    1048576B c=16      r3 goose                 1377 req/s  p99=  14.98ms  wrk= 32%  3686MHz 62C
+    1048576B c=16      r3 direct                4904 req/s  p99=   5.96ms  wrk= 55%  3691MHz 57C
+    1048576B c=16      r3 epoll_copy            1507 req/s  p99=  13.15ms  wrk= 32%  3691MHz 57C
+proxybench report  suite=tcp (INTERNAL: single backend, no TLS, no routing; for visibility, not the production path)
+workers=1(eff 1, nginx 1) backend=builtin secs=8 rounds=3  pinned proxy=[0] backend=[2, 3] wrk=[4, 5, 6, 7]
+perf: not available   L2/core=512KiB
+note: goose: 1 x '/home/bhare/dev/tcprouter/bench/forward_server --listen 127.0.0.1:18447 --to 127.0.0.1:18080 --workers 1 --stat-ms 3600000' on port 18447
+note: 6 CPU vulnerability mitigations active (spectre_v2, vmscape, spec_store_bypass, spectre_v1, retbleed, spec_rstack_overflow): syscalls and kernel entry cost more; 'mitigations=off' on the kernel command line (reboot, less secure) helps every proxy, most those making the most syscalls
+correctness: direct=PASS  epoll_copy=PASS  epoll_hybrid=PASS  goose=PASS
+
+=== 11 B responses, 64 connections, NEW CONNECTION PER REQUEST ==============================
+config              req/svs haproxy  spread      p50      p90      p99    p99.9  err
+direct              46441         -      0%    514us    980us   1.22ms   1.71ms    0
+epoll_copy          10494         -      2%   5.73ms   6.02ms   7.54ms  16.88ms    0
+epoll_hybrid        10621         -      1%   5.72ms   5.96ms   6.58ms  15.46ms    0
+goose                9631         -      1%   6.46ms   6.65ms   7.66ms  20.73ms    0
+
+cpu per request   task us  user%  core us  busy%  sirq%  thr  wrk%  bknd%   MHz   C
+direct                  -      -        -      -      -    0    99     89  3682  60
+epoll_copy           94.8      2     94.8    100     39    4    27     24  3661  58
+epoll_hybrid         93.7      3     94.0    100     40    4    24     24  3688  56
+goose               103.5      3    103.6    100     42    3    23     22  3690  52
+proxy.c counters   conns  ->splice  ->copy  spills  enobufs splice/req
+epoll_copy         94425         0       0       0        0       0.00
+epoll_hybrid       95730         0       0       0        0       0.00
+  ! client-bound (wrk >90% busy, true gaps are larger): direct
+
+=== 16384 B responses, 64 connections ==============================
+config              req/svs haproxy  spread      p50      p90      p99    p99.9  err
+direct             130825         -      0%    512us    595us   1.10ms   1.16ms    0
+epoll_copy          43442         -      1%   1.44ms   1.54ms   1.93ms   6.36ms    0
+epoll_hybrid        47327         -      2%   1.33ms   1.41ms   1.76ms   5.83ms    0
+goose               43683         -      1%   1.44ms   1.54ms   1.87ms   6.12ms    0
+
+cpu per request   task us  user%  core us  busy%  sirq%  thr  wrk%  bknd%   MHz   C
+direct                  -      -        -      -      -    0    60    100  3692  58
+epoll_copy           22.9      3     22.9    100     39    4    51     53  3680  56
+epoll_hybrid         21.2      3     21.1    100     42    4    54     55  3691  56
+goose                22.9      3     22.9    100     39    3    51     52  3691  56
+proxy.c counters   conns  ->splice  ->copy  spills  enobufs splice/req
+epoll_copy           131         0       0       0        0       0.00
+epoll_hybrid         131       128       0       0        0       3.40
+  ! backend-bound: backend at 100% during direct
+
+=== 1048576 B responses, 16 connections ==============================
+config              req/svs haproxy  spread      p50      p90      p99    p99.9  err
+direct               4881         -      1%   2.87ms   5.14ms   6.02ms   6.95ms    0
+epoll_copy           1507         -      7%  10.46ms  11.26ms  13.05ms  26.22ms    0
+epoll_hybrid         5079         -      0%   2.74ms   4.66ms   6.07ms  33.72ms    0
+goose                1401         -      6%  10.99ms  13.08ms  14.39ms  16.50ms    0
+
+cpu per request   task us  user%  core us  busy%  sirq%  thr  wrk%  bknd%   MHz   C
+direct                  -      -        -      -      -    0    55    100  3691  64
+epoll_copy          663.1      1    662.9    100     29    4    32     43  3691  57
+epoll_hybrid        196.2      2    195.6     99     40    4    55     99  3673  65
+goose               714.5      2    712.6    100     34    3    33     38  3685  62
+proxy.c counters   conns  ->splice  ->copy  spills  enobufs splice/req
+epoll_copy            35         0       0       0        0       0.00
+epoll_hybrid          35        32       0       0        0      17.87
+  ! backend-bound: backend at 100% during direct
+  ! backend-bound: backend at 99% during epoll_hybrid
+
+=== overall (geometric mean of req/s relative to nginx/haproxy across sizes) ===
+
+legend: task us = proxy process CPU per request (whether it includes network softirq depends on the kernel's
+accounting); core us = whole proxy-core time per request incl. softirq (pinned only); sirq% = softirq share
+of proxy cores; thr = max threads
+(io-wq helpers show up here); wrk%/bknd% = load generator / backend utilisation; perf columns are per
+request on the proxy cores: cycles, IPC, syscalls, context switches, cache misses.
+
+>> report:  /home/bhare/dev/docker/results/proxybench-20261109-193817/report.txt      (paste this back)
+>> archive: /home/bhare/dev/docker/results/proxybench-20261109-193817.tar.gz          (sysinfo, raw json, logs)

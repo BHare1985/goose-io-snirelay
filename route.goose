@@ -64,7 +64,7 @@ fn _route_for_name(cfg: const Config&, listener: u16, name: const u8[:]) -> cons
         }
     }
     if best { return best; }
-    return _first_any_route(cfg, listener);
+    _first_any_route(cfg, listener)
 }
 
 // Internal: a client with no name, or not TLS at all: a NoSni row, then Any.
@@ -76,7 +76,7 @@ fn _route_without_name(cfg: const Config&, listener: u16) -> const Route? {
             _ => {},
         }
     }
-    return _first_any_route(cfg, listener);
+    _first_any_route(cfg, listener)
 }
 
 fn _first_any_route(cfg: const Config&, listener: u16) -> const Route? {
@@ -87,16 +87,16 @@ fn _first_any_route(cfg: const Config&, listener: u16) -> const Route? {
             _ => {},
         }
     }
-    return null;
+    null
 }
 
 // Internal: `name` without one trailing dot.
 fn _trim_trailing_dot(name: const u8[:]) -> const u8[:] {
     if name.len > 0 && name[name.len - 1] == '.' { return name[..name.len - 1]; }
-    return name;
+    name
 }
 
-fn _lowercase(c: u8) -> u8 { return if c >= 'A' && c <= 'Z' { c + 32 } else { c }; }
+fn _lowercase(c: u8) -> u8 { if c >= 'A' && c <= 'Z' { c + 32 } else { c } }
 
 // Internal: equal as host names: ASCII case ignored, one trailing dot ignored on either side. Empty
 // names are never equal to anything.
@@ -105,7 +105,7 @@ fn _same_host_name(a: const u8[:], b: const u8[:]) -> bool {
     let y = _trim_trailing_dot(b);
     if x.len == 0 || x.len != y.len { return false; }
     for i in x.len { if _lowercase(x[i]) != _lowercase(y[i]) { return false; } }
-    return true;
+    true
 }
 
 // Internal: `name` ends in "." followed by `suffix` (so the apex itself is not below it).
@@ -115,5 +115,5 @@ fn _is_below_suffix(name: const u8[:], suffix: const u8[:]) -> bool {
     if n[n.len - suffix.len - 1] != '.' { return false; }
     let tail = n[n.len - suffix.len..];
     for i in suffix.len { if _lowercase(tail[i]) != _lowercase(suffix[i]) { return false; } }
-    return true;
+    true
 }

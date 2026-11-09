@@ -1,0 +1,4 @@
+CONTAINER ID   IMAGE                           COMMAND                  CREATED       STATUS       PORTS                                                             NAMES
+6d077725618a   8c7e918bb86e                    "/gatekeeper proxy -…"   6 days ago    Up 6 days                                                                      strange_sutherland
+eae6bcd28d60   postgres:18                     "docker-entrypoint.s…"   9 days ago    Up 9 days    127.0.0.1:5432->5432/tcp                                          mu-pg
+7144c9b5751a   portainer/portainer-ce:latest   "/portainer"             11 days ago   Up 10 days   8000/tcp, 9443/tcp, 0.0.0.0:9000->9000/tcp, [::]:9000->9000/tcp   portainer

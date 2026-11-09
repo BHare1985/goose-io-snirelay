@@ -31,3 +31,28 @@ Still open: lifetime-checker error messages in practice, `thread_spawn_contained
     control thread must read stdin with a raw `read(0, …)` extern instead (tests/net/harness/forward_server.goose does).
 24. [V] Goose `thread_spawn(W, …)` takes the thread_fn as a trailing function argument of a generic function; globals set in `main`
     before the spawn (pipe fds, a worker count) are copied into each worker and into a control thread started later.
+
+
+## Author's idioms, checked against upstream docs and samples (2026-11-09)
+
+Sources: `upstream/goose/docs/tutorial.md` (sections 9, 13), `docs/reference.md` (Namespaces, UFCS), `docs/design/namespaces.md`,
+`docs/design/root_structs.md`, `stdlib/slot_pool.goose`, `samples/05_shapes.goose`, `17_calc.goose`, `18_json.goose`; README of
+github.com/aardappel/goose. A pasted AI-Studio chat about "classes in Goose" was checked against them: its core claims hold
+(no classes/inheritance/vtables; structs + UFCS + namespaces; enums + case functions for polymorphism; root structs for several
+growables), its extras do not (see the last bullet).
+- **[D] Call with method syntax.** `x.f(a)` is `f(x, a)`; it looks in the namespace of x's type FIRST, from any namespace
+  (reference, "Namespaces"). So Worker functions are written `w._pump(i)`, `w.send(conn, bytes)`, `w.serve() { ... }`, not `_pump(w, i)`.
+  The author's stdlib does this everywhere (`pool.alloc_index(v)`, `items.push(x)`). [V] converted all of tcprouter; builds and passes.
+- **[D] Short functions are one expression, no `return`.** `fn area(s: Shape.Rect) -> f64 { s.w * s.h }`. Keep `return` for early exits.
+- **[D] Per-variant behaviour: `match`, or case functions** (one overload per variant: `fn area(s: Shape.Circle)`, `fn area(s: Shape.Rect)`;
+  the call `area(s)` dispatches through a jump table and stops compiling when a variant is added). Use case functions when the behaviour is
+  "a method of the enum"; a `match` when one arm does something and the rest are `_ => {}` (as in route.goose). No enum-to-integer builtin exists.
+- **[D] Nested functions share the enclosing function's locals "so you avoid passing a state struct through every call"** (tutorial section 9 and 13), but only
+  "when the code that works on the tables is small enough to fit inside the driver ... The struct is for code spread over many functions or files."
+  tcprouter's engine spans files, so `root struct Worker` + UFCS functions is the right shape; nested functions are for helpers inside one function.
+- **[D] There is no privacy** ("There is no privacy, no re-export and no nesting of namespaces", reference; "Goose currently lacks field privacy:
+  internal-field conventions and checked indexing preserve memory safety", root_structs.md). A leading underscore is OUR convention (the user's call), not the author's: his stdlib has no
+  underscore names. Keep it, and say so in the README.
+- **[D] Several growables in one value: `root struct`** (slot_pool, slice_pool are the author's examples; fields are plain, no privacy).
+- **Not from the author (do not rely on):** "opaque handle + validating API" as a privacy pattern; "private helper = nested fn" at namespace level;
+  the chat's `import image.filters;` form and its `PI  s.r  s.r` example (its multiplication signs were lost).

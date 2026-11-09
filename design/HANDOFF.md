@@ -1,7 +1,7 @@
 # Handoff (Brian, 2026-11-04; updated after M4)
 
 **Update after M4:** M4 is done (timeouts, drain, messages, tags and deadlines, stats across workers); 21 test files pass; 42 of 48 v1 rows are
-green or done, the remaining six are M5 (RT-2a, RT-5f, RT-5g, RT-11a-c). `serve(w, policy)` (the tcpproxy hook) is still the one engine stub. The
+green or done, the remaining six are M5 (RT-2a, RT-5f, RT-5g, RT-11a-c). `w.serve(policy)` (the tcpproxy hook) is still the one engine stub. The
 backpressure_test flake hunt came back clean: 60 of 60 runs (30 alone, 30 beside a looping forward_test), so RT-5c and RT-5d are done.
 library lines: Goose 2005, C 223. The sections below are the end-of-M3 handoff and are kept for the record.
 
@@ -51,7 +51,7 @@ Nothing. No uncommitted work, no experiment left running. `tests/net/PLAN-M2.md`
 
 ## Open questions and things to check
 
-- `serve(w, policy)` (the tcpproxy form) is still a stub; design/07 and O-1 (verified) say how the engine will call the policy (`p.pick(...)` on a generic parameter).
+- `w.serve(policy)` (the tcpproxy form) is still a stub; design/07 and O-1 (verified) say how the engine will call the policy (`p.pick(...)` on a generic parameter).
 - `Worker` has about 16 growable fields, so each worker reserves roughly 16 x 2 GB of address space for data stacks (`--stacks` shows it). Fine for tens of workers;
   if it matters, `--stack-reserve` shrinks it, or fewer fields (e.g. merge the two free lists).
 - Per-connection memory: `_ConnectionSlot` grew when handler mode arrived (output queue fields). RT-5b measured 58 bytes per idle connection *before* that; re-measure

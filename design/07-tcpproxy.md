@@ -5,7 +5,7 @@ It has no sockets and no threads: tcprouter's engine asks it, synchronously, on 
 
 ## How the engine calls it without callbacks
 
-Goose generics are monomorphized and untyped parameters are generic [D]. So `serve(w, p) {…}`
+Goose generics are monomorphized and untyped parameters are generic [D]. So `w.serve(p) {…}`
 is compiled once per policy type, and inside it the engine calls plain functions on `p`:
 
 ```goose

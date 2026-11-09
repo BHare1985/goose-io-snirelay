@@ -25,14 +25,14 @@ fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter
     var s .= sessions.items[user];
     if !s.live { return; }
     if s.inbox.len + bytes.len > s.inbox.cap {            // request head too large
-        tcprouter::reset(w, conn);
+        w.reset(conn);
         return;
     }
     s.inbox.append(bytes);
     loop {
         let end = find(s.inbox, "\r\n\r\n");
         if end < 0 { break; }
-        tcprouter::send(w, conn, RESPONSE);
+        w.send(conn, RESPONSE);
         let used = end + 4;
         let rest = s.inbox.len - used;
         for k in rest { s.inbox[k] = s.inbox[used + k]; }
@@ -43,12 +43,12 @@ fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var sessions = slot_pool<Session> {};
     var w = tcprouter::Worker { .. };
-    if !tcprouter::start(w, cfg, index) { print(w.error); return; }
-    tcprouter::serve(w) { w, ev =>
+    if !w.start(cfg, index) { print(w.error); return; }
+    w.serve() { w, ev =>
         match ev {
             Opened o => {
                 let i = sessions.alloc_index(Session { inbox: [], live: true });
-                tcprouter::set_user(w, o.conn, i as u32);
+                w.set_user(o.conn, i as u32);
             },
             Data d => { on_data(w, sessions, d.conn, d.user, d.bytes); },
             Closed c => {

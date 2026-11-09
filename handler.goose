@@ -17,7 +17,7 @@ import .conn;
 // (buffer_size x 4, 64 KB at the default size), so a larger response must be sent in pieces, the next one when Writable
 // arrives. After a false you get exactly one Writable once there is room.
 fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool {
-    let i = _handler_slot(w, c);
+    let i = w._handler_slot(c);
     if i < 0 { return false; }
     let s .= w._connection_slots[i];
     if s.closing { return false; }
@@ -33,63 +33,63 @@ fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool {
     var offset = 0;
     while offset < bytes.len {
         if s.out_count == 0 || s.out_lengths[s.out_count - 1] == size {
-            s.out_buffers[s.out_count] = _take_buffer(w);
+            s.out_buffers[s.out_count] = w._take_buffer();
             s.out_lengths[s.out_count] = 0;
             s.out_count++;
         }
         let k = s.out_count - 1;
         let used = s.out_lengths[k];
         let n = if size - used < bytes.len - offset { size - used } else { bytes.len - offset };
-        let target = _buffer_slice(w, s.out_buffers[k])[used..used + n];
+        let target = w._buffer_slice(s.out_buffers[k])[used..used + n];
         target.move_from(bytes[offset..offset + n]);
         s.out_lengths[k] += n as i32;
         offset += n;
     }
     s.consumed = true;
     s.last_active_ms = w._now_ms;
-    _flush_output(w, i);
-    return true;
+    w._flush_output(i);
+    true
 }
 
 // Closes after the queued bytes are sent.
 fn close(w: Worker&, c: Conn) {
-    let i = _handler_slot(w, c);
-    if i >= 0 { _begin_close(w, i, CloseReason.ByHandler); }
+    let i = w._handler_slot(c);
+    if i >= 0 { w._begin_close(i, CloseReason.ByHandler); }
 }
 
 // Closes now with an RST. (Named `reset`, not `abort`, which would hide Goose's builtin here.)
 fn reset(w: Worker&, c: Conn) {
-    let i = _handler_slot(w, c);
+    let i = w._handler_slot(c);
     if i < 0 { return; }
     c_reset(w._connection_slots[i].client_fd);
     w._connection_slots[i].client_fd = -1;              // already closed, with an RST
-    _close_connection(w, i, CloseReason.ByHandler);
+    w._close_connection(i, CloseReason.ByHandler);
 }
 
 // Your own id for this connection, returned in every later event. tcprouter stores only the u32.
 fn set_user(w: Worker&, c: Conn, user: u32) {
-    let i = _handler_slot(w, c);
+    let i = w._handler_slot(c);
     if i >= 0 { w._connection_slots[i].user = user; }
 }
 
 fn user(w: Worker&, c: Conn) -> u32 {
-    let i = _handler_slot(w, c);
-    return if i >= 0 { w._connection_slots[i].user } else { 0 };
+    let i = w._handler_slot(c);
+    if i >= 0 { w._connection_slots[i].user } else { 0 }
 }
 
 // Stops or resumes reading from the peer: your own backpressure.
 fn pause_reading(w: Worker&, c: Conn, paused: bool) {
-    let i = _handler_slot(w, c);
+    let i = w._handler_slot(c);
     if i < 0 { return; }
     w._connection_slots[i].paused = paused;
-    _update_epoll_interest(w, i);
+    w._update_epoll_interest(i);
 }
 
 // Hands the connection to the engine's forwarding. Only before any byte was consumed or sent; false (and nothing
 // done) afterwards. When it returns true the handler's ownership ENDS: no Closed event follows, so free your
 // per-connection state now.
 fn forward(w: Worker&, c: Conn, to: Target) -> bool {
-    let i = _handler_slot(w, c);
+    let i = w._handler_slot(c);
     if i < 0 { return false; }
     let s .= w._connection_slots[i];
     if s.consumed || s.out_count > 0 || s.data_pending || to.addrs.len == 0 { return false; }
@@ -98,8 +98,8 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool {
     if at < 0 { at = w._override_targets.len; w._override_targets.push(to); } else { w._override_targets[at] = to; }
     s.override_target = at as i32;
     s.state = _STATE_CONNECTING;
-    _start_connecting(w, i, to.addrs.len);
-    return true;
+    w._start_connecting(i, to.addrs.len);
+    true
 }
 
 // --- the queue of events ---------------------------------------------------------------------------------------
@@ -129,7 +129,7 @@ fn _queue_event(w: Worker&, kind: u8, i: i64) -> _PendingEvent& {
 }
 
 fn _queue_closed(w: Worker&, i: i64, reason: CloseReason) {
-    let closed .= _queue_event(w, _PENDING_CLOSED, i);
+    let closed .= w._queue_event(_PENDING_CLOSED, i);
     closed.why = reason;
 }
 
@@ -138,7 +138,7 @@ fn _handler_slot(w: Worker&, c: Conn) -> i64 {
     if c.slot >= w._connection_slots.len { return -1; }
     let s .= w._connection_slots[c.slot];
     if !s.live || s.gen != c.gen || s.state != _STATE_HANDLING { return -1; }
-    return c.slot;
+    c.slot
 }
 
 // Calls the user's block for every queued event, in order, including those the block itself causes.
@@ -156,9 +156,9 @@ fn _deliver_events<F>(w: Worker&) {
             let e: Event = Event.Opened { conn: conn, tag: r.tag, listener: r.listener, sni: r.sni };
             F(w, e);
         } else if r.kind == _PENDING_DATA {
-            let e: Event = Event.Data { conn: conn, user: user, bytes: _buffer_slice(w, r.buf)[..r.len] };
+            let e: Event = Event.Data { conn: conn, user: user, bytes: w._buffer_slice(r.buf)[..r.len] };
             F(w, e);
-            _data_delivered(w, r);
+            w._data_delivered(r);
         } else if r.kind == _PENDING_WRITABLE {
             let e: Event = Event.Writable { conn: conn, user: user };
             F(w, e);
@@ -180,29 +180,29 @@ fn _data_delivered(w: Worker&, r: _PendingEvent) {
             s.up = _Direction { .. };
         }
     }
-    _give_back_buffer(w, r.buf);
-    if r.slot < w._connection_slots.len && w._connection_slots[r.slot].gen == r.gen { _update_epoll_interest(w, r.slot); }
+    w._give_back_buffer(r.buf);
+    if r.slot < w._connection_slots.len && w._connection_slots[r.slot].gen == r.gen { w._update_epoll_interest(r.slot); }
 }
 
 // --- reading and writing for a handler connection ------------------------------------------------------------
 
 fn _handler_can_read(s: _ConnectionSlot&) -> bool {
-    return !s.closing && !s.paused && !s.data_pending && !s.up.eof && !s.up.waiting;
+    !s.closing && !s.paused && !s.data_pending && !s.up.eof && !s.up.waiting
 }
 
 // One read; the bytes become a Data event that keeps the buffer until the block has seen them.
 fn _read_for_handler(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
-    if !_handler_can_read(s) { return; }
-    let b = _take_buffer(w);
+    if !s._handler_can_read() { return; }
+    let b = w._take_buffer();
     if b < 0 {                                           // pool empty: wait for a buffer, do not read
         s.up.waiting = true;
         w._waiting_reads.push(_pack_event_data(1, i, s.gen));
         w._stats.buffer_waits++;
-        _update_epoll_interest(w, i);
+        w._update_epoll_interest(i);
         return;
     }
-    let buffer = _buffer_slice(w, b);
+    let buffer = w._buffer_slice(b);
     let n = c_recv(s.client_fd, buffer[0], buffer.len);
     if n > 0 {
         s.up.buf = b;
@@ -210,22 +210,22 @@ fn _read_for_handler(w: Worker&, i: i64) {
         s.data_pending = true;
         s.consumed = true;
         w._stats.bytes_in += n;
-        let data .= _queue_event(w, _PENDING_DATA, i);
+        let data .= w._queue_event(_PENDING_DATA, i);
         data.buf = b;
         data.len = n as i32;
-        _update_epoll_interest(w, i);
+        w._update_epoll_interest(i);
         return;
     }
-    _give_back_buffer(w, b);
-    if n == 0 { s.up.eof = true; _begin_close(w, i, CloseReason.PeerClosed); return; }
-    if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) { _update_epoll_interest(w, i); return; }
-    _close_connection(w, i, CloseReason.PeerReset);
+    w._give_back_buffer(b);
+    if n == 0 { s.up.eof = true; w._begin_close(i, CloseReason.PeerClosed); return; }
+    if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) { w._update_epoll_interest(i); return; }
+    w._close_connection(i, CloseReason.PeerReset);
 }
 
 fn _output_bytes(s: _ConnectionSlot&) -> i64 {
     var total = 0;
     for k in s.out_count { total += s.out_lengths[k]; }
-    return total - s.out_pos;
+    total - s.out_pos
 }
 
 // Writes the queue as far as the socket takes it. When it is empty: close if a close is waiting for it, and say Writable if
@@ -233,13 +233,13 @@ fn _output_bytes(s: _ConnectionSlot&) -> i64 {
 fn _flush_output(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
     while s.out_count > 0 {
-        let rest = _buffer_slice(w, s.out_buffers[0])[s.out_pos..s.out_lengths[0]];
+        let rest = w._buffer_slice(s.out_buffers[0])[s.out_pos..s.out_lengths[0]];
         let n = c_send(s.client_fd, rest[0], rest.len);
         if n > 0 {
             s.out_pos += n as i32;
             w._stats.bytes_out += n;
             if s.out_pos == s.out_lengths[0] {            // the oldest buffer is done: back to the pool, the others move up
-                _give_back_buffer(w, s.out_buffers[0]);
+                w._give_back_buffer(s.out_buffers[0]);
                 for k in 1..4 { s.out_buffers[k - 1] = s.out_buffers[k]; s.out_lengths[k - 1] = s.out_lengths[k]; }
                 s.out_count--;
                 s.out_pos = 0;
@@ -247,16 +247,16 @@ fn _flush_output(w: Worker&, i: i64) {
         } else if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) {
             break;
         } else {
-            _close_connection(w, i, CloseReason.PeerReset);
+            w._close_connection(i, CloseReason.PeerReset);
             return;
         }
     }
-    if s.out_count == 0 && s.closing { _close_connection(w, i, s.closing_reason); return; }
-    if s.want_writable && _output_bytes(s) < w.cfg.limits.buffer_size {
+    if s.out_count == 0 && s.closing { w._close_connection(i, s.closing_reason); return; }
+    if s.want_writable && s._output_bytes() < w.cfg.limits.buffer_size {
         s.want_writable = false;
-        let writable .= _queue_event(w, _PENDING_WRITABLE, i);
+        let writable .= w._queue_event(_PENDING_WRITABLE, i);
     }
-    _update_epoll_interest(w, i);
+    w._update_epoll_interest(i);
 }
 
 // Close once the queue is empty (now, if it already is).
@@ -265,5 +265,5 @@ fn _begin_close(w: Worker&, i: i64, reason: CloseReason) {
     if s.closing { return; }
     s.closing = true;
     s.closing_reason = reason;
-    _flush_output(w, i);
+    w._flush_output(i);
 }

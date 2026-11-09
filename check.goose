@@ -56,7 +56,7 @@ fn check(cfg: const Config&, problems: u8[>..]&) -> bool {
             _ => {},
         }
     }
-    return problems.len == before;
+    problems.len == before
 }
 
 // Internal: an SNI row needs its listener to read the ClientHello.

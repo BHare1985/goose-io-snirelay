@@ -74,7 +74,7 @@ fn push_pattern(w: tcprouter::Worker&, c: tcprouter::Conn, s: Session&) {
         let left = s.target - s.sent;
         let n = if left < chunk.len { left } else { chunk.len };
         for k in n { chunk[k] = pattern_byte(s.sent + k); }
-        if !tcprouter::send(w, c, chunk[..n]) {
+        if !w.send(c, chunk[..n]) {
             s.falses++;
             return;                                 // wait for Writable
         }
@@ -83,17 +83,17 @@ fn push_pattern(w: tcprouter::Worker&, c: tcprouter::Conn, s: Session&) {
     if s.sent == s.target {
         s.target = -1;                              // done once
         if LOG_EVENTS { print("E sent-all ", conn_name(c), " falses=", s.falses, " writables=", s.writables); }
-        tcprouter::close(w, c);
+        w.close(c);
     }
 }
 
 // --- echo with flow control -------------------------------------------------------------------------------
 
 fn echo(w: tcprouter::Worker&, c: tcprouter::Conn, s: Session&, bytes: const u8[:]) {
-    if !tcprouter::send(w, c, bytes) {
+    if !w.send(c, bytes) {
         s.pending.clear();
         s.pending.append(bytes);                    // keep it, stop reading until it fits
-        tcprouter::pause_reading(w, c, true);
+        w.pause_reading(c, true);
     }
 }
 
@@ -102,16 +102,16 @@ fn echo(w: tcprouter::Worker&, c: tcprouter::Conn, s: Session&, bytes: const u8[
 fn on_opened(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, tag: u16) {
     let index = sessions.alloc_index(Session { tag: tag, sent: 0, target: 0, received: 0, fnv: FNV_OFFSET, falses: 0,
                                                writables: 0, pending: [], forwarded: false });
-    tcprouter::set_user(w, conn, index as u32);
+    w.set_user(conn, index as u32);
     log(str("E open ", conn_name(conn), " tag=", tag));
     let s .= sessions.items[index];
     if tag == TAG_SEND_1MB { s.target = MB; push_pattern(w, conn, s); }
     else if tag == TAG_FLOOD { s.target = 64 * MB; push_pattern(w, conn, s); }
-    else if tag == TAG_RESET { tcprouter::reset(w, conn); }
+    else if tag == TAG_RESET { w.reset(conn); }
     else if tag == TAG_FORWARD_ON_OPEN {
         var t = tcprouter::Target { addrs: [] };
         t.addrs.push(tcprouter::Addr { text: FORWARD_TO });
-        let ok = tcprouter::forward(w, conn, t);
+        let ok = w.forward(conn, t);
         log(str("E forward ", conn_name(conn), " result=", ok));
         if ok { sessions.free(index); }             // ownership ended: no Closed event will come, so free the state now
         else { s.forwarded = true; }
@@ -127,7 +127,7 @@ fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter
     if s.tag == TAG_FORWARD_AFTER_DATA && !s.forwarded {
         var t = tcprouter::Target { addrs: [] };
         t.addrs.push(tcprouter::Addr { text: FORWARD_TO });
-        let ok = tcprouter::forward(w, conn, t);
+        let ok = w.forward(conn, t);
         s.forwarded = true;                         // ask once
         log(str("E forward ", conn_name(conn), " result=", ok));
     }
@@ -141,9 +141,9 @@ fn on_writable(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcpro
     log(str("E writable ", conn_name(conn)));
     if s.tag == TAG_SEND_1MB || s.tag == TAG_FLOOD { if s.target >= 0 { push_pattern(w, conn, s); } }
     else if s.pending.len > 0 {
-        if tcprouter::send(w, conn, s.pending) {
+        if w.send(conn, s.pending) {
             s.pending.clear();
-            tcprouter::pause_reading(w, conn, false);
+            w.pause_reading(conn, false);
         }
     }
 }
@@ -159,7 +159,7 @@ fn on_tick(now_ms: i64, last: i64&, every_ms: i64, w: tcprouter::Worker&, index:
     if LOG_EVENTS { print("E tick ", now_ms); }
     if now_ms - last >= every_ms {
         last = now_ms;
-        let s = tcprouter::stats(w);
+        let s = w.stats();
         print("STAT ", index, " accepted=", s.accepted, " open=", s.open, " bytes_in=", s.bytes_in, " bytes_out=", s.bytes_out,
               " buffers_in_use=", s.buffers_in_use, " buffer_waits=", s.buffer_waits);
     }
@@ -168,7 +168,7 @@ fn on_tick(now_ms: i64, last: i64&, every_ms: i64, w: tcprouter::Worker&, index:
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var sessions = slot_pool<Session> {};
     var w = tcprouter::Worker { .. };
-    if !tcprouter::start(w, cfg, index) {
+    if !w.start(cfg, index) {
         write_stderr(str("handler_server: worker ", index, ": ", w.error, "\n"));
         qput(Started { worker: index, ok: false });
         return;
@@ -177,7 +177,7 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
     print("READY ", index);
     var last: i64 = 0;
     let every_ms = STAT_MS;
-    tcprouter::serve(w) { w, ev =>
+    w.serve() { w, ev =>
         match ev {
             Opened o => { on_opened(w, sessions, o.conn, o.tag); },
             Data d => { on_data(w, sessions, d.conn, d.user, d.bytes); },

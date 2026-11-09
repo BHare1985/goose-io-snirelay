@@ -84,7 +84,7 @@ fn parse_hello(bytes: const u8[:], scratch: u8[:]) -> Hello {
 // Internal: the length of the whole handshake message (4-byte header + 24-bit body length).
 // `head` holds at least the 4 header bytes.
 fn _handshake_message_length(head: const u8[:]) -> i64 {
-    return 4 + ((head[1] as i64) << 16 | (head[2] as i64) << 8 | head[3]);
+    4 + ((head[1] as i64) << 16 | (head[2] as i64) << 8 | head[3])
 }
 
 // Internal: the ClientHello body (RFC 8446 section 4.1.2):
@@ -115,7 +115,7 @@ fn _parse_client_hello_body(body: const u8[:]) -> Hello {
         if !ok_k || !ok_l || !ok_d { return Hello.Invalid; }
         if kind == EXT_SERVER_NAME { return _parse_server_name_list(ext); }
     }
-    return Hello.NoSni;
+    Hello.NoSni
 }
 
 // Internal: the body of a server_name extension (RFC 6066 section 3): list<2> { name_type(1) name<2> }.
@@ -132,7 +132,7 @@ fn _parse_server_name_list(ext: binary::Reader&) -> Hello {
         if !ok_t || !ok_w || !ok_b { return Hello.Invalid; }
         if name_type == NAME_TYPE_HOST { return _parse_host_name(name); }
     }
-    return Hello.NoSni;
+    Hello.NoSni
 }
 
 // Internal: the rules for the name itself (design/04-sni.md): ASCII letters, digits, '.' and '-'
@@ -151,5 +151,5 @@ fn _parse_host_name(raw: const u8[:]) -> Hello {
         if !allowed { return Hello.Invalid; }
         found.name.push(lower);
     }
-    return found;
+    found
 }

@@ -18,6 +18,8 @@ Upstream docs/source: `goose-kb/upstream/goose/{docs,stdlib,samples}`.
 5. Add anything new you learn to `GOOSE_LESSONS.md` with [V]erified / [D]oc / [R]ecommendation tags.
 
 ## Defaults
+- Method syntax (UFCS): `w.pump(i)`, not `pump(w, i)`. Short functions are one tail expression. Per-variant behaviour: `match` or case functions.
+  State inside one function: nested functions over locals; state across files: `root struct` + UFCS functions. There is no privacy in Goose (a `_` prefix is only our convention).
 - Builder/arena `T[>..]`; struct-embedded buffers `T[..N]`; scratch `T[N]`; params `T[:]`; stack/queue `T[>..<]`.
 - Bind with `.=` to hold a reference, `copy()` to really copy. `import std;` is required for `split/trim/find/parse_int`.
 - Errors: trailing `bool`, `T?`, `return E from f`; `assert/abort` only for bugs.

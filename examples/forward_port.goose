@@ -6,11 +6,11 @@ import tcprouter from "..";
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var w = tcprouter::Worker { .. };
-    if !tcprouter::start(w, cfg, index) {
+    if !w.start(cfg, index) {
         print("worker ", index, ": ", w.error);
         return;
     }
-    tcprouter::serve(w) { w, ev => };          // forward-only: nothing to handle
+    w.serve() { w, ev => };          // forward-only: nothing to handle
 }
 
 fn main() {
