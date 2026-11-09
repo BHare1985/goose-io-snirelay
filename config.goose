@@ -8,6 +8,7 @@ namespace tcprouter;
 // Building a Config never aborts.
 struct Addr { text: u8[..48], too_long: bool = false }
 
+// An address "host:port" as a value. Text over 48 bytes sets too_long (check() reports it); never aborts.
 fn addr(text: const u8[:]) -> Addr {
     var a = Addr { text: [] };
     if text.len > a.text.cap {
@@ -99,6 +100,7 @@ fn sni_route(listener: u16, name: const u8[:], action: Action) -> Route {
     Route { listener: listener, on: n, action: action }
 }
 
+// A route that matches every connection on the listener. Put it after the specific routes: the first match wins.
 fn any_route(listener: u16, action: Action) -> Route {
     Route { listener: listener, on: Match.Any, action: action }
 }

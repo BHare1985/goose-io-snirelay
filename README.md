@@ -4,22 +4,68 @@ Fast TCP servers for Linux, in memory-safe Goose: listeners, one event loop per 
 TLS server name (SNI, read without decrypting), byte-for-byte forwarding, and event handlers for
 protocols of your own (an HTTP server, for example).
 
-**Status:** under construction (milestone M1). The design is in [design/](design/README.md); every
-behaviour is a numbered row in [design/05-requirements.md](design/05-requirements.md) and each row is
-proved by a test under [tests/](tests/). Nothing is released.
+**Status:** v0.1.0 candidate. The engine, SNI routing, handler mode, deadlines/fences and draining are built and tested;
+see [docs/status.md](docs/status.md) for what is verified, what is not, and what is open. Every behaviour is a numbered row in
+[design/05-requirements.md](design/05-requirements.md) and each row is proved by a test under [tests/](tests/).
 
 ```goose
 import tcprouter from "github.com/bhare1985/tcprouter@v0";
 ```
 
 Needs Goose (tested with `goose 751794c`), `git` to fetch the package, and a C compiler: the package carries
-one small C file (`src/c_sys.c`).
+one small C file (`src/c_sys.c`). Linux only.
+
+## Start here
+
+| You want to | Read |
+|---|---|
+| write an HTTP server (or any protocol of your own) | [docs/building-an-http-server.md](docs/building-an-http-server.md), then copy [examples/http_server.goose](examples/http_server.goose) |
+| forward ports or route TLS by server name (nothing decrypted) | [examples/forward_port.goose](examples/forward_port.goose), [examples/sni_router.goose](examples/sni_router.goose) |
+| know what is verified, measured and open | [docs/status.md](docs/status.md), [bench/RESULTS.md](bench/RESULTS.md) |
+| plan Gatekeeper's next step | [docs/gatekeeper-next-step.md](docs/gatekeeper-next-step.md) |
+| see the API | [design/02-api.md](design/02-api.md) |
+
+## The smallest program
+
+Forward one port to two backends (this is `examples/forward_port.goose`, copied here by hand; `tests/net/readme_test.py` fails if the two differ):
+
+```goose
+// Forward one TCP port to two backends, round robin: the smallest tcprouter program.
+//
+//     goose build examples/forward_port.goose && ./examples/forward_port
+//
+import tcprouter from "..";
+
+thread_fn worker(cfg: tcprouter::Config, index: i64) {
+    var w = tcprouter::Worker { .. };
+    if !w.start(cfg, index) {
+        print("worker ", index, ": ", w.error);
+        return;
+    }
+    w.serve() { w, ev => };          // forward-only: nothing to handle
+}
+
+fn main() {
+    var cfg = tcprouter::Config { .. };
+    cfg.listeners.push(tcprouter::Listener { id: 1, addr: tcprouter::addr("0.0.0.0:5432") });
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, tcprouter::target(["10.0.0.5:5432", "10.0.0.6:5432"])) }));
+
+    var problems: u8[>..] = [];
+    if !tcprouter::check(cfg, problems) {
+        print(problems);
+        exit(2);
+    }
+    tcprouter::spawn(cfg, tcprouter::cpu_count(), worker);
+    tcprouter::wait_for_signal_then_drain(30000);
+}
+```
 
 ## Examples
 
 - [examples/forward_port.goose](examples/forward_port.goose): forward one port to two backends.
 - [examples/sni_router.goose](examples/sni_router.goose): route TLS by server name, nothing decrypted.
-- [examples/http_hello.goose](examples/http_hello.goose): an HTTP/1.1 keep-alive server on handler mode.
+- [examples/http_hello.goose](examples/http_hello.goose): the smallest HTTP/1.1 keep-alive server on handler mode (every request gets "hello").
+- [examples/http_server.goose](examples/http_server.goose): a complete HTTP/1.1 server (bodies of any size, files, HEAD, pipelining, backpressure) that the benchmarking guides use; same behaviour as `bench/backend.c`.
 
 ## Conventions for people reading or extending the code
 

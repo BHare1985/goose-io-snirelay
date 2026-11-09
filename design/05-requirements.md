@@ -21,7 +21,7 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-2a | 10,000 concurrent idle connections per worker are held | v1 | `scale_test` | design |
+| RT-2a | 10,000 concurrent idle connections per worker are held | v1 | `scale_test` | green |
 | RT-2b | An event or handle carrying an old generation never touches the connection now in that slot (1,000,000 open/close cycles with slot reuse, random resets) | v1 | `generation_test` | green |
 | RT-2c | Slot indices from the kernel are range-checked; an out-of-range index is counted and dropped | v1 | `generation_test` | green |
 
@@ -58,8 +58,8 @@ Columns: id · behaviour · priority · test · status.
 | RT-5c | A destination that stops reading stops the engine reading from the source; RSS grows ≤ 64 MB while 1 GB is offered (measured growth printed each run) | v1 | `backpressure_test` | done |
 | RT-5d | With the pool exhausted, the worker keeps serving other connections as buffers return; no abort, waits counted | v1 | `backpressure_test` | done |
 | RT-5e | Handler `send` returns false at the per-connection cap and `Writable` follows once drained; memory stays bounded | v1 | `handler_test` | green |
-| RT-5f | One busy connection can't starve others: with one 1 GB stream and 100 small request/reply clients, small p99 < 10 ms | v1 | `fairness_test` | design |
-| RT-5g | No allocation on the established forwarding path (Goose `--stats` or data-stack high-water flat across 10 GB forwarded) | v1 | `memory_test` | design |
+| RT-5f | One busy connection can't starve others: with one 1 GB stream and 100 small request/reply clients, small p99 < 10 ms | v1 | `fairness_test` | green |
+| RT-5g | No allocation on the established forwarding path (Goose `--stats` or data-stack high-water flat across 10 GB forwarded) | v1 | `flat_memory_test` | green |
 
 ## RT-6 Tags, fences and deadlines
 
@@ -109,9 +109,9 @@ Columns: id · behaviour · priority · test · status.
 
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
-| RT-11a | README with a working forward example and the HTTP example, both built by CI | v1 | `examples_test` | partly green: the examples build and http_hello runs; the README example is later |
-| RT-11b | Every public function has a comment saying what it does, who owns what, and whether it can fail | v1 | review | design |
-| RT-11c | `docs/memory.md`: what allocates and when, measured | v1 | review | design |
+| RT-11a | README with a working forward example and the HTTP example, both built by CI | v1 | `examples_test`, `readme_test` | green (README example is examples/forward_port.goose, checked by readme_test; examples build) |
+| RT-11b | Every public function has a comment saying what it does, who owns what, and whether it can fail | v1 | `comments_test` | green |
+| RT-11c | `docs/memory.md`: what allocates and when, measured | v1 | review | green (docs/memory.md) |
 
 
 ## RT-12 The HTTP server example (examples/http_server.goose)
@@ -120,8 +120,8 @@ The server the benchmarking guides use, and the pattern a new agent copies. Beha
 
 | id | Behaviour | Ver | Test | Status |
 |---|---|---|---|---|
-| RT-12a | `GET /`, `GET /N` (N up to 64 MiB, body[i] = i % 251), `HEAD`, 404, 405, 400 and 431 are answered correctly; a worker survives all of them | v1 | `http_server_test` | design |
-| RT-12b | Keep-alive, pipelining, a head cut at every position, `Connection: close`, HTTP/1.0, a request body that arrives in pieces, case-insensitive headers | v1 | `http_server_test` | design |
-| RT-12c | 64 MiB to a slow reader arrives complete and byte-exact with the server's memory flat (send queue backpressure) | v1 | `http_server_test` | design |
-| RT-12d | `--root DIR`: every file served byte-exact with its content type; a directory is a 404 | v1 | `http_server_test` | design |
-| RT-12e | 100,000 requests from 200 keep-alive clients, every body byte-exact | v1 | `http_server_test` | design |
+| RT-12a | `GET /`, `GET /N` (N up to 64 MiB, body[i] = i % 251), `HEAD`, 404, 405, 400 and 431 are answered correctly; a worker survives all of them | v1 | `http_server_test` | green |
+| RT-12b | Keep-alive, pipelining, a head cut at every position, `Connection: close`, HTTP/1.0, a request body that arrives in pieces, case-insensitive headers | v1 | `http_server_test` | green |
+| RT-12c | 64 MiB to a slow reader arrives complete and byte-exact with the server's memory flat (send queue backpressure) | v1 | `http_server_test` | green |
+| RT-12d | `--root DIR`: every file served byte-exact with its content type; a directory is a 404 | v1 | `http_server_test` | green |
+| RT-12e | 100,000 requests from 200 keep-alive clients, every body byte-exact | v1 | `http_server_test` | green |

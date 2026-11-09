@@ -75,6 +75,7 @@ fn set_user(w: Worker&, c: Conn, user: u32) {
     if i >= 0 { w._connection_slots[i].user = user; }
 }
 
+// The id set with set_user, or 0 if none was set or the connection is gone.
 fn user(w: Worker&, c: Conn) -> u32 {
     let i = w._handler_slot(c);
     if i >= 0 { w._connection_slots[i].user } else { 0 }
