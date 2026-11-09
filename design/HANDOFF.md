@@ -1,6 +1,6 @@
 # Handoff (Brian, 2026-11-09, at the v0.1.0 candidate)
 
-Everything is committed; nothing is half-built. `tests/run_tests.sh`: **30 test files, 0 failed** (about 15 minutes). Every v1 requirement row in
+Everything is committed; nothing is half-built. `tests/run_tests.sh`: **30 test files, 0 failed**. Every v1 requirement row in
 [05-requirements.md](05-requirements.md) is green or done; the only rows not green are the two v2 rows (RT-4f bench harness, RT-4g splice).
 library lines: Goose 2126, C 222. What is verified, measured and open is in [docs/status.md](../docs/status.md).
 
