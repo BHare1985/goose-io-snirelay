@@ -16,7 +16,7 @@ All paths are in the Gatekeeper repository, `docs/` (on the dev host `~/dev/gate
 | `sprints/sprint-02.md` | what the current sprint demands, acceptance steps, who owns what |
 | `18-requirements.md`, section "Routing and proxy (PRX)" | the proxy rows, with their status; the rows a replacement proxy has to keep green |
 | `21-design-status.md` | what is built, what is decided but not built, and what is open; the table at the top |
-| `23-ui-workflows.md`, `24-panel-design-review.md`, `25-panel-redesign-brief.md`, and `openapi.yaml` (named by Charlie as `~/dev/gatekeeper/docs/openapi.yaml`; **not found there when this was written, ask Charlie for the path**) | the panel and its API contract (D45, D46, D48) |
+| `23-ui-workflows.md`, `24-panel-design-review.md`, `25-panel-redesign-brief.md`, and `~/dev/gk/docs/openapi.yaml` (in the gk repo, the runtime, not the gatekeeper docs repo; last changed in e988789) | the panel and its API contract (D45, D46, D48) |
 | `02-architecture.md` | the witness (D47) |
 | `22-health-checks.md` | the check model behind D43 and D44 |
 | `~/dev/c_proxy/AGENTS.md`, `verify_backends.py` (26 tests) | the proxy that ships today and the acceptance suite a replacement must pass unchanged |
