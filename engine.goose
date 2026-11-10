@@ -4,6 +4,7 @@
 namespace tcprouter;
 
 import .config;
+import .policy;
 
 // --- connections and events ---------------------------------------------------------------------
 
@@ -104,6 +105,9 @@ root struct Worker {
     _deadline_scan_at: i64 = 0,                  // the earliest deadline not yet enforced, or 0
     _now_ms: i64 = 0,                            // CLOCK_BOOTTIME at the start of the current pass of the loop
     _listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
+    _policy_on: bool = false,                    // serve(policy): forwarded connections ask the policy (policy.goose)
+    _policy_requests: _PolicyRequest[>..] = [],  // what the policy has to be told or asked, drained by serve
+    _policy_head: i64 = 0,
 }
 
 // Binds this worker's listeners (SO_REUSEPORT) and prepares its tables. Returns false and fills
@@ -142,11 +146,24 @@ fn start(w: Worker&, cfg: const Config&, index: i64) -> bool {
 // gets the worker so it can call send, close... Forward-only configs pass an empty block. (A `return`
 // in the block leaves the function that contains it: call a named function from the block.)
 fn serve<F>(w: Worker&) {
+    var none = _NoPolicy { };
+    w._policy_on = false;
+    w._serve_loop(none, F);
+}
+
+// As serve, with a policy deciding where forwarded connections go (tcpproxy, design/07; the hooks are in policy.goose).
+// The policy is called on this worker's thread, between batches of events, never from inside the epoll dispatch.
+fn serve<P, F>(w: Worker&, p: P&) {
+    w._policy_on = true;
+    w._serve_loop(p, F);
+}
+
+fn _serve_loop<P, F>(w: Worker&, p: P&) {
     var events: c_EpollEvent[256] = [c_EpollEvent { 0, 0 }; 256];
     var last_tick: i64 = 0;
     var last_sweep: i64 = 0;
     loop {
-        let wait_ms: i32 = if w._ready_head < w._ready.len { 0 } else { 100 };     // work left over: do not sleep
+        let wait_ms: i32 = if w._ready_head < w._ready.len || w._policy_head < w._policy_requests.len { 0 } else { 100 };     // work left over: do not sleep
         let n = c_epoll_wait(w._epoll_fd, events[0], 256, wait_ms);
         w._now_ms = c_boottime_ms();
         // Messages first, then deadlines, then events: a drain or a fence must not be outrun by traffic in the same pass.
@@ -158,6 +175,7 @@ fn serve<F>(w: Worker&) {
             for k in n { if (events[k].data & 0xff) != _EVENT_KIND_MESSAGE { w._dispatch_event(events[k].data, events[k].events); } }
         }
         w._run_ready();
+        w._deliver_policy(p);
         w._deliver_events(F);
         if w._drain_finished() { w._deliver_events(F); return; }
         let now = w._now_ms;
@@ -175,11 +193,6 @@ fn serve<F>(w: Worker&) {
     }
 }
 
-// As serve, with a policy deciding where forwarded connections go (tcpproxy, design/07).
-fn serve<P, F>(w: Worker&, p: P&) {
-    let e: Event = Event.Tick { now_ms: 0 };    // STUB until M3
-    F(w, e);
-}
 
 // --- running workers and talking to them --------------------------------------------------------
 

@@ -10,10 +10,10 @@ is compiled once per policy type, and inside it the engine calls plain functions
 
 ```goose
 // What any policy provides (tcprouter's built-in one, tcpproxy's, or a test double): [verify O-1]
-fn pick(p: P&, route: u16, conn: Conn, tried: u32) -> Pick      // Pick.To(addr, tag, gen) | Pick.None
-fn connect_failed(p: P&, conn: Conn, tag: u16) -> Retry         // Retry.Next | Retry.GiveUp
+fn pick(p: P&, route: u16, conn: Conn, tried: u32, now_ms: i64) -> Pick           // Pick.To { addr, tag, gen, slot } | Pick.None
+fn connect_failed(p: P&, conn: Conn, slot: u8, tag: u16, tried: u32, now_ms: i64) -> Retry   // Retry.Next | Retry.GiveUp
 fn connected(p: P&, conn: Conn, tag: u16)                       // sessions + 1
-fn closed(p: P&, conn: Conn, tag: u16, why: CloseReason)        // sessions − 1
+fn closed(p: P&, conn: Conn, tag: u16, why: CloseReason)        // sessions − 1 (only for a connection `connected` was called for)
 fn on_message(p: P&, m: PolicyMessage) -> Effect                 // state changes; may ask for CloseTagged
 ```
 
@@ -28,11 +28,15 @@ Server[]  id, addr, state: up | down | degraded | maintenance, tag, deadline_ms 
           lease_required, sessions, passive_fail_until_ms
 ```
 
+`now_ms` is CLOCK_BOOTTIME, passed in so the policy is pure. The engine keeps `tried: u32` per connection, sets bit `slot` of each
+`Pick.To` before it connects and passes the set back, so the policy keeps no per-connection memory (32 slots per route, the C proxy's
+MAX_SLOTS). Built and green as policy.goose / RT-13 (Charlie approved the shape, 2026-11-10).
+
 ## Rules (PX rows)
 
 | id | Behaviour |
 |---|---|
-| PX-1a | Pick skips servers that are down or in maintenance; prefers up over degraded; backups only when no primary is up |
+| PX-1a | Pick skips servers that are down or in maintenance; prefers up over degraded; backups only when no primary is up. Order: up primary, degraded primary, up backup, degraded backup; a degraded primary still serves, so it beats an up backup (new: C's pick_slot has no degraded state, proxy.c:873–900) |
 | PX-1b | Round robin across eligible servers per worker |
 | PX-2a | A refused or timed-out connect marks that server "skip" for 2 s (configurable) on this worker and reports the failure upward (D44: the report becomes a Gatus result) |
 | PX-2b | Retry the next eligible server until each was tried once |

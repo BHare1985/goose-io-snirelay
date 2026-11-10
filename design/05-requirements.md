@@ -125,3 +125,16 @@ The server the benchmarking guides use, and the pattern a new agent copies. Beha
 | RT-12c | 64 MiB to a slow reader arrives complete and byte-exact with the server's memory flat (send queue backpressure) | v1 | `http_server_test` | green |
 | RT-12d | `--root DIR`: every file served byte-exact with its content type; a directory is a 404 | v1 | `http_server_test` | green |
 | RT-12e | 100,000 requests from 200 keep-alive clients, every body byte-exact | v1 | `http_server_test` | green |
+
+## RT-13 The policy hook (`w.serve(policy)`, design/07)
+
+| id | Behaviour | Release | Test | Status |
+|---|---|---|---|---|
+| RT-13a | With `serve(policy)` the engine asks `pick(route, conn, tried, now_ms)` where a forwarded connection goes, connects there, and uses the pick's tag and generation | post-v0.1.0 | `serve_policy_test` | green |
+| RT-13b | A failed connect calls `connect_failed`, then `pick` again with the failed slot's bit set in `tried` (bit set before the connect) | post-v0.1.0 | `serve_policy_test` | green |
+| RT-13c | `Retry.GiveUp` closes the client with no further pick; `Pick.None` closes it with no byte sent | post-v0.1.0 | `serve_policy_test` | green |
+| RT-13d | `connected` and `closed` are called with the pick's tag, `closed` only after `connected`; a policy never sees a connection that was not connected | post-v0.1.0 | `serve_policy_test` | green |
+| RT-13e | Without a policy, `serve` behaves as before (built-in rotation); the other test files stay green | post-v0.1.0 | all other tests | green (31 test files; tls_support_test failed once in the full run and passed 3 of 3 alone, see TODO) |
+| RT-13f | Retry only before a client byte was consumed holds under a policy (RT-4c on the policy path) | post-v0.1.0 | not yet written | open |
+
+Row numbers RT-13a to f are Brian's proposal (Bryan's README left them for Charlie to assign).

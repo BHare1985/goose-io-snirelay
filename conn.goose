@@ -77,6 +77,10 @@ struct _ConnectionSlot {
     route_index: u16,            // the route the connection took (an index into cfg.routes)
     first_target: u8,            // the address the built-in policy starts with
     attempts: u8,                // addresses tried so far
+    tried: u32,                  // policy mode: the slots tried so far, one bit each (policy.goose)
+    pick_slot: u8,               // policy mode: the slot of the pick being connected
+    policied: bool,              // policy mode: the policy decides this connection's server
+    policy_connected: bool,      // the policy was told it connected, so it is told when it closes
     tag: u16,                    // the tag of the Handle route or of the forward target (0: untagged)
     target_gen: u32,             // the generation of that target (close-by-tag)
     override_target: i32,        // a connection the handler forwarded: its target's index in w._override_targets, else -1
@@ -249,6 +253,7 @@ fn _close_connection(w: Worker&, i: i64, reason: CloseReason) {
     if s.client_fd >= 0 { c_close(s.client_fd); }
     if s.server_fd >= 0 { c_close(s.server_fd); }
     if s.state == _STATE_HANDLING { w._queue_closed(i, reason); }
+    if s.policy_connected { w._queue_policy_closed(i, reason); }
     for k in s.out_count { w._give_back_buffer(s.out_buffers[k]); }
     if s.override_target >= 0 { w._override_targets[s.override_target].addrs.clear(); }
     s.live = false;
@@ -314,7 +319,7 @@ fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool, now: i64) -> _Co
     return _ConnectionSlot {
         gen: gen, live: true, state: if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING }, client_fd: fd, server_fd: -1,
         client_mask: if inspect { c_EPOLLIN } else { 0 }, client_registered: false, server_mask: 0, ready: 0, queued: false, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
-        inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tag: 0, target_gen: 0, override_target: -1,
+        inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tried: 0, pick_slot: 0, policied: false, policy_connected: false, tag: 0, target_gen: 0, override_target: -1,
         out_buffers: [-1; 4], out_lengths: [0; 4], out_count: 0, out_pos: 0, consumed: false, paused: false,
         data_pending: false, want_writable: false, closing: false, closing_reason: CloseReason.PeerClosed,
         up: _Direction { .. }, down: _Direction { .. },
@@ -423,9 +428,11 @@ fn _route_and_connect(w: Worker&, i: i64, hello: Hello) {
 
     var count = 0;
     var handle = false;
+    var forward = false;
     var tag: u16 = 0;
     match route.action {
         Forward f => {
+            forward = true;
             if f.to < w.cfg.targets.len {
                 let t .= w.cfg.targets[f.to as i64];
                 count = t.addrs.len; tag = t.tag; s.target_gen = t.gen;
@@ -435,6 +442,7 @@ fn _route_and_connect(w: Worker&, i: i64, hello: Hello) {
         _ => {},
     }
     s.tag = tag;
+    if w._policy_on && forward { w._start_deciding(i); return; }   // the policy picks, and its tag is fenced then
     if !w._tag_allows(tag) { w._close_connection(i, CloseReason.Fenced); return; }   // fenced, or past its deadline
     if handle { w._start_handling(i, tag, hello); return; }
     if count == 0 { w._close_connection(i, CloseReason.ByHandler); return; }
@@ -507,6 +515,20 @@ fn _count_connect_failure(w: Worker&, attempts: i64, addresses: i64) {
     if attempts < addresses { w._stats.retries++; }
 }
 
+// Starts a connect to `addr` and puts the new socket into epoll. false when the socket could not even be started.
+fn _connect_to(w: Worker&, i: i64, addr: Addr) -> bool {
+    let s .= w._connection_slots[i];
+    s.started_ms = w._now_ms;                          // the connect timeout runs from here
+    var p = _ParsedAddress { false, [0; 16], 0 };
+    var sfd: i32 = -1;
+    if _parse_address(addr.text, p) { sfd = c_connect_start(p.v6, p.ip, p.port); }
+    if sfd < 0 { return false; }
+    s.server_fd = sfd;
+    s.server_mask = c_EPOLLIN | c_EPOLLOUT | c_EPOLLRDHUP | c_EPOLLET;
+    c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, sfd, s.server_mask, _pack_event_data(_EVENT_KIND_SERVER, i, s.gen));
+    true
+}
+
 // Starts a connect to the next address not yet tried, or closes the connection when every address has failed. An
 // address that fails at once is counted and the next is tried in the same call; one that is merely in progress ends
 // the call and _connect_finished decides later.
@@ -518,16 +540,7 @@ fn _attempt_connect(w: Worker&, i: i64) {
         if s.attempts >= count { w._close_connection(i, CloseReason.ConnectFailed); return; }
         let index = (s.first_target + s.attempts) % count;
         s.attempts++;
-        s.started_ms = w._now_ms;                          // the connect timeout runs from here
-        var p = _ParsedAddress { false, [0; 16], 0 };
-        var sfd: i32 = -1;
-        if _parse_address(target.addrs[index].text, p) { sfd = c_connect_start(p.v6, p.ip, p.port); }
-        if sfd >= 0 {
-            s.server_fd = sfd;
-            s.server_mask = c_EPOLLIN | c_EPOLLOUT | c_EPOLLRDHUP | c_EPOLLET;
-            c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, sfd, s.server_mask, _pack_event_data(_EVENT_KIND_SERVER, i, s.gen));
-            return;
-        }
+        if w._connect_to(i, target.addrs[index]) { return; }
         w._count_connect_failure(s.attempts, count);
     }
 }
@@ -539,6 +552,7 @@ fn _connect_failed(w: Worker&, i: i64) {
     s.server_fd = -1;
     s.server_mask = 0;
     s.ready = s.ready & (255 - _READY_SERVER_BITS);        // whatever the failed attempt reported is void
+    if s.policied { w._policy_connect_failed(i); return; }      // the policy decides what next
     w._count_connect_failure(s.attempts, w._target_of(s).addrs.len);
     w._attempt_connect(i);
 }
@@ -547,6 +561,7 @@ fn _connect_finished(w: Worker&, i: i64) {
     let s .= w._connection_slots[i];
     if c_connect_result(s.server_fd) != 0 { w._connect_failed(i); return; }
     s.state = _STATE_FORWARDING;
+    if s.policied { s.policy_connected = true; w._queue_policy(_POLICY_CONNECTED, i); }
     s.ready |= _READY_SERVER_OUT;                          // a finished connect is writable; its edge was this event
     w._pump(i);
 }
