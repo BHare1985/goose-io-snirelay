@@ -102,6 +102,7 @@ root struct Worker {
     _draining: bool = false,
     _drain_deadline_ms: i64 = 0,
     _tags: _TagEntry[..64] = [],                 // deadlines per tag (messages.goose)
+    _tags_full: bool = false,                    // a deadline could not be recorded (table full): every tag without an entry is fenced (RT-6g)
     _deadline_scan_at: i64 = 0,                  // the earliest deadline not yet enforced, or 0
     _now_ms: i64 = 0,                            // CLOCK_BOOTTIME at the start of the current pass of the loop
     _listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0

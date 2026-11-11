@@ -125,7 +125,17 @@ struct _TagEntry { tag: u16, until_ms: i64 }
 fn _tag_allows(w: Worker&, tag: u16) -> bool {
     if tag == 0 { return true; }
     for e in w._tags { if e.tag == tag { return e.until_ms > c_boottime_ms(); } }
-    true
+    !w._tags_full
+}
+
+// Adds a tag to the deadline table. When the table is full the tag cannot be recorded, and a tag without an entry is normally
+// unfenced, so dropping it would silently loosen a fence. Fail closed instead: from now on every tag without an entry is fenced
+// (RT-6g), and the scan runs at once so open connections of such tags are closed too. A program that sees tags refused sizes its
+// tag use below 64 per worker.
+fn _record_tag(w: Worker&, tag: u16, until_ms: i64) {
+    if w._tags.len < w._tags.cap { w._tags.push(_TagEntry { tag: tag, until_ms: until_ms }); return; }
+    w._tags_full = true;
+    w._deadline_scan_at = w._now_ms;
 }
 
 // The latest deadline wins: a later one renews, an earlier or equal one (a delayed or duplicate message) changes nothing.
@@ -134,7 +144,7 @@ fn _set_deadline(w: Worker&, tag: u16, until_ms: i64) {
     for &e in w._tags {
         if e.tag == tag { found = true; if until_ms > e.until_ms { e.until_ms = until_ms; } }
     }
-    if !found && w._tags.len < w._tags.cap { w._tags.push(_TagEntry { tag: tag, until_ms: until_ms }); }
+    if !found { w._record_tag(tag, until_ms); }
     if w._deadline_scan_at == 0 || until_ms < w._deadline_scan_at { w._deadline_scan_at = until_ms; }
 }
 
@@ -145,7 +155,7 @@ fn _replace_deadline(w: Worker&, tag: u16, until_ms: i64) {
     let until = if until_ms == 0 { _NO_DEADLINE } else { until_ms };
     var found = false;
     for &e in w._tags { if e.tag == tag { found = true; e.until_ms = until; } }
-    if !found && w._tags.len < w._tags.cap { w._tags.push(_TagEntry { tag: tag, until_ms: until }); }
+    if !found { w._record_tag(tag, until); }
     if w._deadline_scan_at == 0 || until < w._deadline_scan_at { w._deadline_scan_at = until; }
 }
 
