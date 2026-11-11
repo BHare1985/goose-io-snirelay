@@ -31,3 +31,26 @@ library lines: Goose 2126, C 222. What is verified, measured and open is in [doc
 
 * Goose is pre-1.0; tested with `goose 751794c`. gslib (used only by `tests/net/harness/tls_server.goose`) is fetched at a pinned commit; its licence is unstated (O-9).
 * The Gatekeeper guide `docs/gatekeeper-next-step.md` was reviewed by Charlie; it says replacing the C proxy is not a decided goal.
+
+## Queue after v0.1.0 (updated 2026-11-11; the full list with details is the local `TODO.md`)
+
+State of `main` at 3657c89 (pushed): policy hook (55be46b), CLAUDE.md, ReplaceDeadline + SetAddr + 64-byte Message (3657c89).
+RT-6f is green 26/26 and 100 of 100 runs alone; the 100-run gate **under load is pending** (run it under `~/dev/docker/tools/run-locked.sh`, hogs killed by a trap;
+`/tmp/rd_load.sh` was the script). The full suite has not been rerun since the policy-hook commit. RT-10c is green.
+
+Order (Charlie, priority: tcprouter + tcpproxy ready for Demo 2):
+1. **T01c Message.Policy + `on_message(p, body, now_ms) -> Effect`** (`Effect = None | CloseTagged { tag, gen }`, performed on that worker only; body at most 48 bytes).
+   Unblocks about 17 of Bryan's 19 failing tests. **Work in progress, UNCOMMITTED in the working tree**: `engine.goose` (Message.Policy), `messages.goose`
+   (kind 7: byte 15 = length, bytes 16 to 63 = body), `policy.goose` (Effect, hook, queueing, delivery), `tests/net/harness/policy_message_server.goose`,
+   `tests/net/policy_message_test.py`, `tests/run_tests.sh`, and `on_message` stub added to `policy_server.goose` (every policy now needs the hook).
+   Test state: 10 of 11 checks pass; the one failing check is probably the test's text match on `now_ok=` (Goose prints a bool in its own spelling; look at
+   the harness output). Rows RT-13g, h, i are not yet in design/05. SetAddr/ReplaceDeadline/Deadline are still to be handed to the policy read-only (Charlie), not done.
+2. **T01d `Pick.To.connect_ms`** (0 = `Limits.connect_timeout_ms`): Bryan's gate and a 6-line patch are in `~/dev/tcpproxy/gates/connect_ms`; every `Pick.To` constructor needs the
+   field; check that a retry restarts the connect timer.
+3. **T01b signals**: SIGUSR1 in the signalfd set, `wait_for_signal() -> i32`, `drain(deadline_ms) -> i64`; `wait_for_signal_then_drain` stays as a wrapper.
+4. The RT-6f gate under load, then the full suite (`tests/run_tests.sh`, about 15 minutes, in the background).
+5. **Tag v0.2.0, move v0, push** (the user approved the push; tag only when 1 to 4 are green), and tell Bryan the commit.
+6. Then be Bryan's first responder: engine bugs from his 27-test verify_backends run come before everything else.
+7. skein items (after tcpproxy passes 27/27): G-1 `shutdown_write`/`close_after_drain` + `w.send_room(conn) -> i64` (v0.2.x), `w.draining() -> bool`,
+   `w.dial(addr, tag) -> Conn` (v0.3; red gate `~/dev/skein/docs/dial-red-gate.md`; `send` before `Opened` returns false, document in design/02).
+Also open: T03 (tls_support_test fence flake, look at it with RT-8c) and the other public-release tasks in TODO.md (user decisions in T05).
