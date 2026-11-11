@@ -18,7 +18,7 @@ struct spy::Policy { addr: tcprouter::Addr, worker: i64 = 0 }
 fn spy::pick(p: spy::Policy&, route: u16, conn: tcprouter::Conn, tried: u32, now_ms: i64) -> tcprouter::Pick {
     if tried != 0 { return tcprouter::Pick.None; }
     print("PICK slot=0 tag=40");
-    return tcprouter::Pick.To { addr: p.addr, tag: 40, gen: 7, slot: 0 };
+    return tcprouter::Pick.To { addr: p.addr, tag: 40, gen: 7, slot: 0, connect_ms: 0 };
 }
 
 fn spy::connect_failed(p: spy::Policy&, conn: tcprouter::Conn, slot: u8, tag: u16, tried: u32, now_ms: i64) -> tcprouter::Retry { tcprouter::Retry.GiveUp }

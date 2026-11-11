@@ -26,7 +26,7 @@ import .engine;
 import .conn;
 
 enum Pick {
-    To { addr: Addr, tag: u16, gen: u32, slot: u8 },   // connect to addr; the connection's tag and target generation are these
+    To { addr: Addr, tag: u16, gen: u32, slot: u8, connect_ms: i64 },   // connect to addr; the connection's tag and target generation are these; connect_ms is this connect's timeout (0 = Limits.connect_timeout_ms)
     None,                                              // nowhere: close the client
 }
 
@@ -168,6 +168,7 @@ fn _take_pick(w: Worker&, i: i64, pick: Pick) {
             s.pick_slot = t.slot;
             s.tag = t.tag;
             s.target_gen = t.gen;
+            s.connect_ms = t.connect_ms;                     // each connect starts its own timer (_connect_to sets started_ms)
             if !w._tag_allows(t.tag) { w._close_connection(i, CloseReason.Fenced); return; }
             s.attempts++;
             if !w._connect_to(i, t.addr) { w._policy_connect_failed(i); }

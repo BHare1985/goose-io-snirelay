@@ -79,6 +79,7 @@ struct _ConnectionSlot {
     attempts: u8,                // addresses tried so far
     tried: u32,                  // policy mode: the slots tried so far, one bit each (policy.goose)
     pick_slot: u8,               // policy mode: the slot of the pick being connected
+    connect_ms: i64,             // policy mode: the pick's own connect timeout, 0 = Limits.connect_timeout_ms
     policied: bool,              // policy mode: the policy decides this connection's server
     policy_connected: bool,      // the policy was told it connected, so it is told when it closes
     tag: u16,                    // the tag of the Handle route or of the forward target (0: untagged)
@@ -319,7 +320,7 @@ fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool, now: i64) -> _Co
     return _ConnectionSlot {
         gen: gen, live: true, state: if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING }, client_fd: fd, server_fd: -1,
         client_mask: if inspect { c_EPOLLIN } else { 0 }, client_registered: false, server_mask: 0, ready: 0, queued: false, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
-        inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tried: 0, pick_slot: 0, policied: false, policy_connected: false, tag: 0, target_gen: 0, override_target: -1,
+        inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tried: 0, pick_slot: 0, connect_ms: 0, policied: false, policy_connected: false, tag: 0, target_gen: 0, override_target: -1,
         out_buffers: [-1; 4], out_lengths: [0; 4], out_count: 0, out_pos: 0, consumed: false, paused: false,
         data_pending: false, want_writable: false, closing: false, closing_reason: CloseReason.PeerClosed,
         up: _Direction { .. }, down: _Direction { .. },
@@ -407,7 +408,8 @@ fn _sweep_timeouts(w: Worker&, now: i64) {
         if s.state == _STATE_INSPECTING {
             if now - s.started_ms >= limits.inspect_timeout_ms { w._close_connection(i, CloseReason.InspectTimeout); }
         } else if s.state == _STATE_CONNECTING {
-            if s.server_fd >= 0 && now - s.started_ms >= limits.connect_timeout_ms { w._connect_failed(i); }
+            let allowed = if s.connect_ms > 0 { s.connect_ms } else { limits.connect_timeout_ms };
+            if s.server_fd >= 0 && now - s.started_ms >= allowed { w._connect_failed(i); }
         } else if s.half_closed_at_ms != 0 {
             let since = if s.last_active_ms > s.half_closed_at_ms { s.last_active_ms } else { s.half_closed_at_ms };
             if now - since >= limits.half_close_timeout_ms { w._close_connection(i, CloseReason.HalfCloseTimeout); }

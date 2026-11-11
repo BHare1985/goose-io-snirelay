@@ -43,7 +43,7 @@ fn spy::pick(p: spy::Policy&, route: u16, conn: tcprouter::Conn, tried: u32, now
         s--;
         if (tried >> (s as u32)) & 1 == 0 {
             print("PICK route=", route, " tried=", tried, " -> slot=", s, " tag=", 40 + s, " gen=7");
-            return tcprouter::Pick.To { addr: p.addrs[s], tag: (40 + s) as u16, gen: 7, slot: s as u8 };
+            return tcprouter::Pick.To { addr: p.addrs[s], tag: (40 + s) as u16, gen: 7, slot: s as u8, connect_ms: 0 };
         }
     }
     print("PICK route=", route, " tried=", tried, " -> none");

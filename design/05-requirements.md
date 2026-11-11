@@ -144,6 +144,8 @@ The server the benchmarking guides use, and the pattern a new agent copies. Beha
 | RT-13i | `Effect.CloseTagged { tag, gen }` closes that worker's connections of the tag (generation <= gen) and nothing else; nothing is re-broadcast | post-v0.1.0 | `policy_message_test` | green |
 | RT-13j | With a policy, a Stats reply is queued behind the Policy messages read before it, so a gather returning proves each worker applied every earlier Policy message (PX-5: post, gather, reply); 100 of 100 in the test, red (40 early replies) with the immediate reply | post-v0.1.0 | `policy_message_test` | green |
 
+| RT-13k | `Pick.To.connect_ms` is the timeout of that connect (0 = `Limits.connect_timeout_ms`); every retry starts its own timer. Red with the engine ignoring the field: 3.01 s instead of 0.3 s and 0.3 s instead of 1.2 s; green with it | post-v0.1.0 | `connect_ms_test` | green |
+
 Per-worker tables for tags are 64 entries: `Config.fenced_tags`, the deadline table and `Stats.tags` (was 16; a deadline for a 17th tag was silently dropped, which left that tag unfenced).
 Every policy type must define `on_message` (Goose has no optional hooks).
 
