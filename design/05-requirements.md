@@ -71,6 +71,7 @@ Columns: id · behaviour · priority · test · status.
 | RT-6c | Deadlines are on `CLOCK_BOOTTIME` | v1 | `deadline_test` (unit, clock source) | green |
 | RT-6d | Deadlines are absolute and the latest wins: a later `until_ms` renews, an earlier or equal one is ignored, so a delayed old message or a duplicate can neither shorten nor stretch a deadline. Revoking is `CloseTagged` or a fence, never a smaller deadline | v1 | `deadline_test` | green |
 | RT-6e | A tag can start fenced (no deadline yet = no connections) | v1 | `deadline_test` | green |
+| RT-6f | `ReplaceDeadline { tag, until_ms }` sets the tag's deadline exactly: shorter, longer or the same, unlike the latest-wins `Deadline` (RT-6d), which ignores an earlier one. **`until_ms = 0` means "this tag is unfenced": it clears the deadline AND lifts the start fence (RT-6e).** It is not a "clear the deadline only" message. The engine has no notion of `lease_required`: that rule lives in tcpproxy's policy, which refuses `lease off` on such servers. Safe because shortening a fence is always safe, and only extending one needs ordering, which one control thread writing FIFO pipes gives | post-v0.1.0 | `replace_deadline_test` | green after the 100-run gate (alone: pending; under load: pending) |
 
 ## RT-7 Timeouts
 
@@ -104,6 +105,7 @@ Columns: id · behaviour · priority · test · status.
 |---|---|---|---|---|
 | RT-10a | `post(m)` reaches every worker once | v1 | `message_test` | green |
 | RT-10b | Stats: accepted, closed by reason, bytes each way, connect failures, retries, buffer waits, sessions per tag; summed across workers they match the test's own counts exactly | v1 | `message_test` | green |
+| RT-10c | `SetAddr { target, slot, addr }` sets address `slot` (0 to 7) of `Config.targets[target]` on every worker; a slot past the end appends; an empty address clears the slot and a cleared slot is never picked (not counted as a failure); a target whose slots are all cleared closes new clients; a bad target, slot or address is ignored (a worker never aborts on a message); open connections keep their address. `Message` is 64 bytes (RT-10a holds: a pipe write up to PIPE_BUF is atomic). The address travels as text, at most 47 bytes (the longest valid Addr; the message body has 48), parsed by the worker as at every connect | post-v0.1.0 | `set_addr_test` | green |
 
 ## Documentation and polish (v1)
 

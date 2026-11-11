@@ -77,3 +77,12 @@ final check and the `send()` syscall: **a pause between the final deadline check
 space.** A worker preempted or stopped exactly there writes its bytes after the deadline. The lease margin (1 s over the TTL for
 Gatekeeper's 3 s TTL) must cover it; the engine's part of the guarantee is that the window is those few instructions and not the
 length of a pass or of a user's handler.
+
+## RT-6f: which deadline message to use (added with ReplaceDeadline)
+
+`Deadline` (RT-6d) is latest-wins: it can only extend, so a late or duplicated message is harmless. It cannot shorten. `ReplaceDeadline` (RT-6f)
+sets the deadline exactly, so a lease renewed to 5000 ms can be replaced by 300 ms, and `0` unfences the tag (deadline and start fence).
+Use `Deadline` when senders are many or unordered; use `ReplaceDeadline` from one ordered writer (one control thread writing the FIFO pipes).
+Shortening a fence is always safe; only extending needs ordering. The release gate is the one used for RT-6a-H: `REPEAT=100
+tests/run_tests.sh replace_deadline` alone, then under load; it includes the frozen-process scenario (SIGSTOP past the deadline, SIGCONT,
+zero bytes forwarded).

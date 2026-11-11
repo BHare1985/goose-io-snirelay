@@ -136,6 +136,24 @@ fn run_command(line: const u8[:]) {
         let tag, ok1 = parse_int(parts[0]);
         let until, ok2 = parse_int(parts[1]);
         if ok1 && ok2 { tcprouter::post(tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
+    } else if verb == "replace-deadline" && parts.len == 2 {
+        let tag, ok1 = parse_int(parts[0]);
+        let until, ok2 = parse_int(parts[1]);       // 0 is valid here, parse_int accepts it
+        if ok1 && ok2 {
+            tcprouter::post(tcprouter::Message.ReplaceDeadline { tag: tag as u16, until_ms: until });
+            // A gather goes through the same pipes after the message, so when it returns every worker has applied it: the program
+            // can now say so. A caller that freezes the process right after the command (verify_backends t_lease) must wait for this.
+            let s = tcprouter::gather_stats(WORKERS);
+            print("ACK replace-deadline");
+        }
+    } else if verb == "set-addr" && parts.len == 3 {
+        let target, ok1 = parse_int(parts[0]);
+        let slot, ok2 = parse_int(parts[1]);
+        if ok1 && ok2 && target >= 0 && target < 65536 && slot >= 0 && slot < 256 {       // out of range: not a message at all
+            var text: u8[>..] = [];
+            if parts[2] != "-" { text.append(parts[2]); }
+            tcprouter::post(tcprouter::Message.SetAddr { target: target as u16, slot: slot as u8, addr: tcprouter::addr(text) });
+        }
     } else if verb == "close-tagged" && parts.len == 2 {
         let tag, ok1 = parse_int(parts[0]);
         let gen, ok2 = parse_int(parts[1]);

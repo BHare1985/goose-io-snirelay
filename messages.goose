@@ -15,7 +15,12 @@ let _MESSAGE_DRAIN: u8 = 1;
 let _MESSAGE_DEADLINE: u8 = 2;
 let _MESSAGE_CLOSE_TAGGED: u8 = 3;
 let _MESSAGE_STATS: u8 = 4;
-let _MESSAGE_SIZE: i64 = 16;                  // kind(1) tag(2) gen(4) value(8), padded to 16; a pipe write this small is atomic
+let _MESSAGE_REPLACE_DEADLINE: u8 = 5;
+let _MESSAGE_SET_ADDR: u8 = 6;
+// kind(1) tag(2) gen(4) value(8), then byte 15 (SetAddr: the slot) and bytes 16 to 63 (SetAddr: the address text, zero padded).
+// A pipe write up to PIPE_BUF (4096 bytes on Linux) is atomic, so each worker still receives each message whole and once (RT-10a).
+let _MESSAGE_SIZE: i64 = 64;
+let _NO_DEADLINE: i64 = 9223372036854775807;  // ReplaceDeadline with 0: an entry that never expires, which is the same as no entry
 
 var _message_read_fds: i32[64] = [-1; 64];    // set by spawn(); each worker finds its own by index
 var _message_write_fds: i32[64] = [-1; 64];
@@ -30,6 +35,12 @@ fn post(m: Message) {
         Deadline d => { _write_message(raw, _MESSAGE_DEADLINE, d.tag, 0, d.until_ms); },
         CloseTagged c => { _write_message(raw, _MESSAGE_CLOSE_TAGGED, c.tag, c.gen, 0); },
         Stats r => { _write_message(raw, _MESSAGE_STATS, r.reply_to, 0, 0); },
+        ReplaceDeadline d => { _write_message(raw, _MESSAGE_REPLACE_DEADLINE, d.tag, 0, d.until_ms); },
+        SetAddr a => {
+            _write_message(raw, _MESSAGE_SET_ADDR, a.target, 0, 0);
+            raw.push(a.slot);
+            raw.append(a.addr.text);
+        },
     }
     while raw.len < _MESSAGE_SIZE { raw.push(0); }
     for k in _worker_count { c_pipe_write(_message_write_fds[k], raw[0], _MESSAGE_SIZE); }
@@ -55,7 +66,7 @@ fn wait_for_signal_then_drain(deadline_ms: i64) {
 
 // Reads every message waiting in this worker's pipe and acts on it.
 fn _read_messages(w: Worker&) {
-    var raw: u8[16] = [0; 16];
+    var raw: u8[64] = [0; 64];
     while c_pipe_read(w._message_fd, raw[0], _MESSAGE_SIZE) == _MESSAGE_SIZE {
         var r = binary::reader(raw[..]);
         let kind, ok = binary::read_u8(r);
@@ -66,6 +77,8 @@ fn _read_messages(w: Worker&) {
         if kind == _MESSAGE_DRAIN { w._begin_drain(value); }
         else if kind == _MESSAGE_DEADLINE { w._set_deadline(tag, value); }
         else if kind == _MESSAGE_CLOSE_TAGGED { w._close_tagged(tag, gen); }
+        else if kind == _MESSAGE_REPLACE_DEADLINE { w._replace_deadline(tag, value); }
+        else if kind == _MESSAGE_SET_ADDR { w._set_address(tag, raw[15], raw[16..64]); }
         else if kind == _MESSAGE_STATS { qput(_StatsReply { worker: w.index, stats: w.stats() }); }
     }
 }
@@ -113,6 +126,35 @@ fn _set_deadline(w: Worker&, tag: u16, until_ms: i64) {
     }
     if !found && w._tags.len < w._tags.cap { w._tags.push(_TagEntry { tag: tag, until_ms: until_ms }); }
     if w._deadline_scan_at == 0 || until_ms < w._deadline_scan_at { w._deadline_scan_at = until_ms; }
+}
+
+// Sets the tag's deadline exactly, shorter or longer than the one it has (RT-6f). 0 means "unfenced": it also lifts the start
+// fence, so the tag is never fenced until a later deadline says so. Use Deadline (latest wins) when messages may arrive late or
+// twice; use this one when the sender is one ordered writer (a control thread writes the pipes in order) and must be able to shorten.
+fn _replace_deadline(w: Worker&, tag: u16, until_ms: i64) {
+    let until = if until_ms == 0 { _NO_DEADLINE } else { until_ms };
+    var found = false;
+    for &e in w._tags { if e.tag == tag { found = true; e.until_ms = until; } }
+    if !found && w._tags.len < w._tags.cap { w._tags.push(_TagEntry { tag: tag, until_ms: until }); }
+    if w._deadline_scan_at == 0 || until < w._deadline_scan_at { w._deadline_scan_at = until; }
+}
+
+// SetAddr (RT-10c): `text` is the address padded with zeros; empty clears the slot (a cleared slot is never picked). A slot
+// past the end appends. A bad target, slot or address is ignored: a message never aborts a worker.
+fn _set_address(w: Worker&, target: u16, slot: u8, text: const u8[:]) {
+    if target >= w.cfg.targets.len { return; }
+    var n = text.len;
+    while n > 0 && text[n - 1] == 0 { n--; }
+    let t .= w.cfg.targets[target as i64];
+    if slot >= 8 { return; }
+    var addr = Addr { text: [] };
+    addr.text.append(text[..n]);
+    if n > 0 {
+        var p = _ParsedAddress { false, [0; 16], 0 };
+        if !_parse_address(addr.text, p) { return; }
+    }
+    if slot < t.addrs.len { t.addrs[slot] = addr; }
+    else if t.addrs.len < t.addrs.cap { t.addrs.push(addr); }
 }
 
 // Closes (as Fenced) every connection of `tag` whose target generation is <= gen.

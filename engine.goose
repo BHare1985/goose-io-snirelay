@@ -232,5 +232,7 @@ enum Message {
     Deadline { tag: u16, until_ms: i64 },     // tag may forward until this CLOCK_BOOTTIME millisecond; the latest deadline wins
     CloseTagged { tag: u16, gen: u32 },       // close every connection of the tag whose target generation is <= gen
     Stats { reply_to: u16 },
+    ReplaceDeadline { tag: u16, until_ms: i64 },   // sets the tag's deadline exactly (shorter or longer); 0 = unfenced (RT-6f)
+    SetAddr { target: u16, slot: u8, addr: Addr }, // sets address `slot` of Config.targets[target] on every worker; empty addr clears it (RT-10c)
 }
 

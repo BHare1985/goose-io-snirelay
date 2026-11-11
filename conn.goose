@@ -540,6 +540,7 @@ fn _attempt_connect(w: Worker&, i: i64) {
         if s.attempts >= count { w._close_connection(i, CloseReason.ConnectFailed); return; }
         let index = (s.first_target + s.attempts) % count;
         s.attempts++;
+        if target.addrs[index].text.len == 0 { continue; }          // a slot cleared by SetAddr: never picked, not a failure
         if w._connect_to(i, target.addrs[index]) { return; }
         w._count_connect_failure(s.attempts, count);
     }
