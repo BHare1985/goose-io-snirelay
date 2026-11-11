@@ -54,3 +54,21 @@ Order (Charlie, priority: tcprouter + tcpproxy ready for Demo 2):
 7. skein items (after tcpproxy passes 27/27): G-1 `shutdown_write`/`close_after_drain` + `w.send_room(conn) -> i64` (v0.2.x), `w.draining() -> bool`,
    `w.dial(addr, tag) -> Conn` (v0.3; red gate `~/dev/skein/docs/dial-red-gate.md`; `send` before `Opened` returns false, document in design/02).
 Also open: T03 (tls_support_test fence flake, look at it with RT-8c) and the other public-release tasks in TODO.md (user decisions in T05).
+
+## Update 2026-11-11 (wrap-up): what is pushed, what is left before v0.2.0
+
+Pushed on main: policy hook 55be46b; ReplaceDeadline + SetAddr 3657c89; Message.Policy + PX-5 + 64-entry tag tables + licences feffc9d;
+fail-closed deadline table (RT-6g, tag 65; red 1 of 5 then green 5/5) 3960a7e; Pick.To.connect_ms (RT-13k; red 3.01 s / 0.3 s, then green) cec6dac;
+signals (RT-8d, RT-8e) in the commit after cec6dac (see `git log`). Full suite last run green at feffc9d (34 files, 0 failed); it has NOT been rerun since.
+No working-tree changes are left uncommitted. TODO.md (local, untracked) holds the long list.
+
+Remaining order before the tag:
+1. The RT-6f 100-run gate under load, UNDER the host lock: build a worktree of the final commit and run `~/dev/docker/tools/run-locked.sh /tmp/rd_load.sh`
+   (it starts nproc busy loops with a trap that kills them; the script is `/tmp/rd_load.sh`, rewrite it if /tmp was cleaned). Never run load outside the lock.
+   RT-6f in design/05 still says "green after the 100-run gate (alone: pending; under load: pending)": alone is 100/100 (fixed test), update it with the result.
+2. The full suite on the final commit (`tests/run_tests.sh`, about 15 minutes, in the background; its 34+ files include the new policy_message, connect_ms, signal and tag_overflow tests).
+3. Tag v0.2.0 and move v0, push both (the user approved; Steve and Charlie said no further OK is needed), then tell Steve and Bryan the sha.
+4. Then be Bryan's first responder for his 27-test verify_backends run (engine bugs first).
+5. After tcpproxy passes 27/27: skein items G-1 `shutdown_write`/`close_after_drain` + `w.send_room`, `w.draining() -> bool`, `w.dial` (v0.3).
+Open: T03 (tls_support_test fence flake, look with RT-8c), the public-release list in TODO.md. Policy types must define `on_message`; every `Pick.To` needs `connect_ms`.
+Known mistake: commit feffc9d says library lines Goose 2373; the real count was 2388 (corrected in 3960a7e's message).
