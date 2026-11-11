@@ -119,6 +119,7 @@ fn start(w: Worker&, cfg: const Config&, index: i64) -> bool {
     w.index = index;
     if _spawn_error.len > 0 {                          // spawn() found a listener it cannot bind
         w.error.append(_spawn_error);
+        qput(_DrainReport { drained: 0 });         // a worker that never serves still owes drain() its report
         return false;
     }
     w._epoll_fd = c_epoll_create();
@@ -178,7 +179,11 @@ fn _serve_loop<P, F>(w: Worker&, p: P&) {
         w._run_ready();
         w._deliver_policy(p);
         w._deliver_events(F);
-        if w._drain_finished() { w._deliver_events(F); return; }
+        if w._drain_finished() {
+            w._deliver_events(F);
+            qput(_DrainReport { drained: w._stats.closed[_close_reason_index(CloseReason.Drained)] });
+            return;
+        }
         let now = w._now_ms;
         w._resume_paused_listeners(now);
         if now - last_sweep >= 250 {

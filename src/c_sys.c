@@ -178,6 +178,7 @@ int32_t c_signals_open(void) {
     sigemptyset(&set);
     sigaddset(&set, SIGTERM);
     sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGUSR1);          /* a program may drain on SIGUSR1 (wait_for_signal returns the number) */
     int rc = pthread_sigmask(SIG_BLOCK, &set, NULL);
     if (rc != 0) return -rc;
     int fd = signalfd(-1, &set, SFD_CLOEXEC);

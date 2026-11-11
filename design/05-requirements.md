@@ -90,6 +90,8 @@ Columns: id · behaviour · priority · test · status.
 | RT-8a | `Drain`: listeners close at once; a new process on the same port gets all new connections | v1 | `drain_test` | green |
 | RT-8b | `Drain` returns when the last connection closes, or closes the rest at the deadline | v1 | `drain_test` | green |
 | RT-8c | SIGTERM and SIGINT start a drain (via `wait_for_signal_then_drain`) | v1 | `drain_test` | green |
+| RT-8d | `wait_for_signal() -> i32` blocks until SIGTERM, SIGINT or SIGUSR1 and returns its number; `wait_for_signal_then_drain` is a wrapper over it and `drain` | post-v0.1.0 | `signal_test` | green |
+| RT-8e | `drain(deadline_ms) -> i64` returns the number of open sessions closed at the deadline (0 = every session ended by itself); sessions that end during the drain are not counted; every worker reports once, also one that failed to start | post-v0.1.0 | `signal_test` | green |
 
 ## RT-9 Handler mode
 

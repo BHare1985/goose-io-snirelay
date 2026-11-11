@@ -59,13 +59,35 @@ fn _write_message(raw: u8[>..]&, kind: u8, tag: u16, gen: u32, value: i64) {
     binary::write_i64le(raw, value);
 }
 
-// Blocks the calling thread until SIGTERM or SIGINT, then drains every worker with a deadline (RT-8c): listeners close at
-// once, connections finish, and what is still open at the deadline is closed. Returns when every worker has ended.
-// Call it from main, after spawn.
-fn wait_for_signal_then_drain(deadline_ms: i64) {
-    if _signal_fd >= 0 { c_signal_wait(_signal_fd); }
+// Blocks the calling thread until SIGTERM, SIGINT or SIGUSR1 arrives and returns its number (15, 2, 10), or -1 when no signalfd exists
+// (call spawn first). The program decides what each signal means: the usual pair is `drain` on all three, or an immediate exit on
+// SIGTERM and a drain on SIGUSR1 (RT-8d).
+fn wait_for_signal() -> i32 {
+    if _signal_fd >= 0 { c_signal_wait(_signal_fd) } else { -1 }
+}
+
+// What a worker says when it has finished: how many sessions it closed at the drain deadline (CloseReason.Drained).
+struct _DrainReport { drained: i64 }
+
+var _drain_done: bool = false;
+
+// Drains every worker (RT-8): listeners close at once, open sessions finish, and the ones still open `deadline_ms` later are closed.
+// Returns when every worker has ended, with the number of sessions closed at the deadline (0 = every session ended by itself) (RT-8e).
+// Call it once, from the thread that called spawn; a second call returns 0.
+fn drain(deadline_ms: i64) -> i64 {
+    if _drain_done { return 0; }
+    _drain_done = true;
     post(Message.Drain { deadline_ms: deadline_ms });
     for k in _worker_count { thread_wait(_worker_ids[k]); }
+    var closed: i64 = 0;
+    for k in _worker_count { closed += qget<_DrainReport>().drained; }     // every worker reports once, when it ends or fails to start
+    closed
+}
+
+// Blocks until SIGTERM or SIGINT (or SIGUSR1), then drains every worker with a deadline (RT-8c). A thin wrapper over the two calls above.
+fn wait_for_signal_then_drain(deadline_ms: i64) {
+    wait_for_signal();
+    drain(deadline_ms);
 }
 
 // --- inside a worker -----------------------------------------------------------------------------------------------

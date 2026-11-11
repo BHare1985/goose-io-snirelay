@@ -117,6 +117,7 @@ fn _fail_start(w: Worker&, what: const u8[:], where: const u8[:], err: i32) -> b
     c_strerror(msg, err);
     let n = if msg.len < w.error.cap { msg.len } else { w.error.cap };
     w.error.append(msg[..n]);
+    qput(_DrainReport { drained: 0 });         // a worker that never serves still owes drain() its report
     false
 }
 
