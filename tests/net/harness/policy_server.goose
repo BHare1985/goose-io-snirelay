@@ -59,6 +59,8 @@ fn spy::connected(p: spy::Policy&, conn: tcprouter::Conn, tag: u16) { print("CON
 
 fn spy::closed(p: spy::Policy&, conn: tcprouter::Conn, tag: u16, why: tcprouter::CloseReason) { print("CLOSED tag=", tag); }
 
+fn spy::on_message(p: spy::Policy&, body: const u8[:], now_ms: i64) -> tcprouter::Effect { tcprouter::Effect.None }
+
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var w = tcprouter::Worker { .. };
     if !w.start(cfg, index) { write_stderr(str("policy_server: ", w.error, "\n")); return; }

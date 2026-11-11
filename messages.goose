@@ -17,6 +17,7 @@ let _MESSAGE_CLOSE_TAGGED: u8 = 3;
 let _MESSAGE_STATS: u8 = 4;
 let _MESSAGE_REPLACE_DEADLINE: u8 = 5;
 let _MESSAGE_SET_ADDR: u8 = 6;
+let _MESSAGE_POLICY: u8 = 7;                 // byte 15 = body length, bytes 16 to 63 = the body (at most 48 bytes)
 // kind(1) tag(2) gen(4) value(8), then byte 15 (SetAddr: the slot) and bytes 16 to 63 (SetAddr: the address text, zero padded).
 // A pipe write up to PIPE_BUF (4096 bytes on Linux) is atomic, so each worker still receives each message whole and once (RT-10a).
 let _MESSAGE_SIZE: i64 = 64;
@@ -36,6 +37,11 @@ fn post(m: Message) {
         CloseTagged c => { _write_message(raw, _MESSAGE_CLOSE_TAGGED, c.tag, c.gen, 0); },
         Stats r => { _write_message(raw, _MESSAGE_STATS, r.reply_to, 0, 0); },
         ReplaceDeadline d => { _write_message(raw, _MESSAGE_REPLACE_DEADLINE, d.tag, 0, d.until_ms); },
+        Policy m => {
+            _write_message(raw, _MESSAGE_POLICY, 0, 0, 0);
+            raw.push(m.body.len as u8);
+            raw.append(m.body);
+        },
         SetAddr a => {
             _write_message(raw, _MESSAGE_SET_ADDR, a.target, 0, 0);
             raw.push(a.slot);
@@ -78,8 +84,12 @@ fn _read_messages(w: Worker&) {
         else if kind == _MESSAGE_DEADLINE { w._set_deadline(tag, value); }
         else if kind == _MESSAGE_CLOSE_TAGGED { w._close_tagged(tag, gen); }
         else if kind == _MESSAGE_REPLACE_DEADLINE { w._replace_deadline(tag, value); }
+        else if kind == _MESSAGE_POLICY { w._queue_policy_message(raw[15], raw[16..64]); }
         else if kind == _MESSAGE_SET_ADDR { w._set_address(tag, raw[15], raw[16..64]); }
-        else if kind == _MESSAGE_STATS { qput(_StatsReply { worker: w.index, stats: w.stats() }); }
+        else if kind == _MESSAGE_STATS {
+            // With a policy the reply is queued behind the policy messages read before it, so a gather proves they were applied (PX-5).
+            if w._policy_on { w._queue_policy_stats(); } else { qput(_StatsReply { worker: w.index, stats: w.stats() }); }
+        }
     }
 }
 

@@ -7,6 +7,7 @@
 //     fn connect_failed(p: P&, conn: Conn, slot: u8, tag: u16, tried: u32, now_ms: i64) -> Retry
 //     fn connected(p: P&, conn: Conn, tag: u16)
 //     fn closed(p: P&, conn: Conn, tag: u16, why: CloseReason)
+//     fn on_message(p: P&, body: const u8[:], now_ms: i64) -> Effect
 //
 // `route` is the index of the Forward target in Config.targets (the group). `now_ms` is CLOCK_BOOTTIME, so the policy has no clock
 // of its own and its rules can be tested without one. `tried` is a bit set the ENGINE keeps for each connection: it sets bit `slot` of
@@ -31,6 +32,13 @@ enum Pick {
 
 enum Retry { Next, GiveUp }
 
+// What a policy asks the engine to do after a message. The engine performs it on this worker only (nothing is re-broadcast: every
+// worker got the same message and its policy decides the same way).
+enum Effect {
+    None,
+    CloseTagged { tag: u16, gen: u32 },      // close every connection of the tag whose target generation is <= gen (as Message.CloseTagged)
+}
+
 // What serve(F) without a policy passes: its hooks are never called, because nothing is ever queued for it.
 struct _NoPolicy { unused: u8 = 0 }
 // The four hooks of the policy nobody supplied; never called (see above).
@@ -41,17 +49,21 @@ fn connect_failed(p: _NoPolicy&, conn: Conn, slot: u8, tag: u16, tried: u32, now
 fn connected(p: _NoPolicy&, conn: Conn, tag: u16) { }
 // (never called)
 fn closed(p: _NoPolicy&, conn: Conn, tag: u16, why: CloseReason) { }
+// (never called)
+fn on_message(p: _NoPolicy&, body: const u8[:], now_ms: i64) -> Effect { Effect.None }
 
 let _POLICY_PICK: u8 = 1;
 let _POLICY_FAILED: u8 = 2;
 let _POLICY_CONNECTED: u8 = 3;
 let _POLICY_CLOSED: u8 = 4;
+let _POLICY_MESSAGE: u8 = 5;
+let _POLICY_STATS: u8 = 6;
 
-struct _PolicyRequest { kind: u8, slot: u32, gen: u32, tag: u16, why: CloseReason }
+struct _PolicyRequest { kind: u8, slot: u32, gen: u32, tag: u16, why: CloseReason, body: u8[..48] }
 
 fn _queue_policy(w: Worker&, kind: u8, i: i64) {
     let s .= w._connection_slots[i];
-    w._policy_requests.push(_PolicyRequest { kind: kind, slot: i as u32, gen: s.gen, tag: s.tag, why: CloseReason.PeerClosed });
+    w._policy_requests.push(_PolicyRequest { kind: kind, slot: i as u32, gen: s.gen, tag: s.tag, why: CloseReason.PeerClosed, body: [] });
 }
 
 // The connection has a Forward route and the engine runs with a policy: it asks for its first pick.
@@ -82,6 +94,22 @@ fn _policy_connect_failed(w: Worker&, i: i64) {
     w._queue_policy(_POLICY_FAILED, i);
 }
 
+// A Message.Policy arrived: queued like the other hooks, so the policy runs between event batches and in post order. Without a policy
+// (serve(F)) the message is dropped.
+fn _queue_policy_message(w: Worker&, length: u8, bytes: const u8[:]) {
+    if !w._policy_on { return; }
+    var body: u8[..48] = [];
+    let n = if length < bytes.len { length } else { bytes.len };
+    body.append(bytes[..n]);
+    w._policy_requests.push(_PolicyRequest { kind: _POLICY_MESSAGE, slot: 0, gen: 0, tag: 0, why: CloseReason.PeerClosed, body: body });
+}
+
+// A Stats request while a policy runs: answered by serve in queue order, after every Policy message that arrived before it (PX-5: post, gather,
+// reply: the gather returning means each worker applied everything posted earlier).
+fn _queue_policy_stats(w: Worker&) {
+    w._policy_requests.push(_PolicyRequest { kind: _POLICY_STATS, slot: 0, gen: 0, tag: 0, why: CloseReason.PeerClosed, body: [] });
+}
+
 // Called by _close_connection for a connection the policy was told is connected.
 fn _queue_policy_closed(w: Worker&, i: i64, reason: CloseReason) {
     w._queue_policy(_POLICY_CLOSED, i);
@@ -94,6 +122,18 @@ fn _deliver_policy<P>(w: Worker&, p: P&) {
         w._policy_head++;
         let conn = Conn { slot: r.slot, gen: r.gen };
         let i = r.slot as i64;
+        if r.kind == _POLICY_STATS {
+            qput(_StatsReply { worker: w.index, stats: w.stats() });
+            continue;
+        }
+        if r.kind == _POLICY_MESSAGE {
+            let effect = p.on_message(r.body[..], w._now_ms);
+            match effect {
+                CloseTagged c => { w._close_tagged(c.tag, c.gen); },
+                _ => {},
+            }
+            continue;
+        }
         if r.kind == _POLICY_CLOSED {
             p.closed(conn, r.tag, r.why);
             continue;

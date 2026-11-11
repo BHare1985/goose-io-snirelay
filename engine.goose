@@ -53,7 +53,7 @@ struct Stats {
     stale_events: i64,        // events for a connection that was already closed and its slot reused (RT-2b)
     bad_events: i64,          // events whose slot index or kind was out of range (RT-2c)
     accept_failures: i64,     // accepts that failed for lack of a resource; the listener rests briefly (RT-1e)
-    tags: TagSessions[..16],  // connections open now under each tag (sessions per tag)
+    tags: TagSessions[..64],  // connections open now under each tag (sessions per tag)
 }
 
 // A snapshot of this worker's counters. Call it on the worker's thread, e.g. from a Tick.
@@ -101,7 +101,7 @@ root struct Worker {
     _message_fd: i32 = -1,                       // this worker's end of its message pipe (messages.goose)
     _draining: bool = false,
     _drain_deadline_ms: i64 = 0,
-    _tags: _TagEntry[..16] = [],                 // deadlines per tag (messages.goose)
+    _tags: _TagEntry[..64] = [],                 // deadlines per tag (messages.goose)
     _deadline_scan_at: i64 = 0,                  // the earliest deadline not yet enforced, or 0
     _now_ms: i64 = 0,                            // CLOCK_BOOTTIME at the start of the current pass of the loop
     _listener_resume_at: i64[16] = [0; 16],  // boottime ms when a paused listener goes back into epoll, or 0
@@ -233,6 +233,7 @@ enum Message {
     CloseTagged { tag: u16, gen: u32 },       // close every connection of the tag whose target generation is <= gen
     Stats { reply_to: u16 },
     ReplaceDeadline { tag: u16, until_ms: i64 },   // sets the tag's deadline exactly (shorter or longer); 0 = unfenced (RT-6f)
+    Policy { body: u8[..48] },                     // handed untouched to the worker's policy: on_message (RT-13g)
     SetAddr { target: u16, slot: u8, addr: Addr }, // sets address `slot` of Config.targets[target] on every worker; empty addr clears it (RT-10c)
 }
 

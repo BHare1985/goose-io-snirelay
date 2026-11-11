@@ -138,5 +138,12 @@ The server the benchmarking guides use, and the pattern a new agent copies. Beha
 | RT-13d | `connected` and `closed` are called with the pick's tag, `closed` only after `connected`; a policy never sees a connection that was not connected | post-v0.1.0 | `serve_policy_test` | green |
 | RT-13e | Without a policy, `serve` behaves as before (built-in rotation); the other test files stay green | post-v0.1.0 | all other tests | green (31 test files; tls_support_test failed once in the full run and passed 3 of 3 alone, see TODO) |
 | RT-13f | Retry only before a client byte was consumed holds under a policy (RT-4c on the policy path) | post-v0.1.0 | not yet written | open |
+| RT-13g | `Message.Policy { body }` (body at most 48 bytes) reaches every worker's policy once, as `on_message(body, now_ms) -> Effect`; without a policy it is dropped | post-v0.1.0 | `policy_message_test` | green |
+| RT-13h | Policy messages are delivered in post order on each worker; a 48-byte body arrives intact | post-v0.1.0 | `policy_message_test` | green |
+| RT-13i | `Effect.CloseTagged { tag, gen }` closes that worker's connections of the tag (generation <= gen) and nothing else; nothing is re-broadcast | post-v0.1.0 | `policy_message_test` | green |
+| RT-13j | With a policy, a Stats reply is queued behind the Policy messages read before it, so a gather returning proves each worker applied every earlier Policy message (PX-5: post, gather, reply); 100 of 100 in the test, red (40 early replies) with the immediate reply | post-v0.1.0 | `policy_message_test` | green |
+
+Per-worker tables for tags are 64 entries: `Config.fenced_tags`, the deadline table and `Stats.tags` (was 16; a deadline for a 17th tag was silently dropped, which left that tag unfenced).
+Every policy type must define `on_message` (Goose has no optional hooks).
 
 Row numbers RT-13a to f are Brian's proposal (Bryan's README left them for Charlie to assign).

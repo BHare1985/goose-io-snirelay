@@ -76,7 +76,7 @@ struct Config {
     routes: Route[..256],
     targets: Target[..64],             // what Forward routes point at: shared, so 8 addresses are not repeated per route
     limits: Limits = Limits { .. },
-    fenced_tags: u16[..16],            // tags that start with no deadline, so their connections are closed until one arrives (RT-6e)
+    fenced_tags: u16[..64],            // tags that start with no deadline, so their connections are closed until one arrives (RT-6e)
 }
 
 // Adds a target to the table and returns its index for Action.Forward { to }. When the table is full it returns
