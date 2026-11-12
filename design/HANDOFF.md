@@ -99,3 +99,5 @@ v0.2.0 and v0 are tagged and pushed (f54cf75; RT-6f 100/100 under load, 75 min 5
 (dial_test 17/17; full suite 38 files, 0 failed on that run). No v0.3 tag yet (Steve/Charlie decide). Next, in order: RT-8c (`drain_test`, loop it under strace with a timestamped log; my untested
 guess is a recycled port on a busy host), then G-1 `shutdown_write`/`close_after_drain` + `w.send_room(conn) -> i64`, then `w.draining() -> bool`. Library lines at 9d37436: Goose 2534, C 223
 (the commit message says 2548, the red commit 2450 instead of 2451: both wrong, corrected here).
+
+v0.3.0 is tagged and pushed (tag ae0c6f1, commit ac76768; dial_test 20/20 under load). The `v0` tag still points at v0.2.0 (f54cf75): my force-push to move it was refused by the permission check and is with the user. Until they decide, consumers pin v0.3.0 (Milli: tag ae0c6f1, commit ac76768).
