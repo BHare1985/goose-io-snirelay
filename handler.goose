@@ -373,3 +373,8 @@ fn _begin_close(w: Worker&, i: i64, reason: CloseReason) {
     s.closing_reason = reason;
     w._flush_output(i);
 }
+
+// STUBS (red gate only, replaced by the implementation in the next commit).
+fn set_keep_open_on_eof(w: Worker&, c: Conn, keep: bool) { }
+fn shutdown_write(w: Worker&, c: Conn) { }
+fn send_room(w: Worker&, c: Conn) -> i64 { -1 }

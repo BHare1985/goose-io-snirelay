@@ -1,0 +1,119 @@
+// Gate for graceful close of handler connections (RT-15): half-close, shutdown_write, send_room.
+//
+//     halfclose_server --listen 127.0.0.1:9000
+//
+// Requests (GET only, one per connection; the connection opts in to keeping itself open after the peer's EOF):
+//   GET /N        N bytes of the pattern (body[i] = i % 251), sent as send() accepts them (false -> wait for Writable), then shutdown_write
+//   GET /room     prints `ROOM fresh=F after1000=A full=0|>0 after_drain=D`, then answers "ok" and closes
+//   GET /plain/N  like /N but WITHOUT the opt-in (the default: the connection closes after the peer's EOF, queued bytes flushed first)
+// stdout: READY, PEER_EOF (once per connection that opted in), CLOSED why=W, ROOM ...
+import tcprouter from "../../..";
+import slot_pool;
+import std;
+import os;
+
+let PERIOD = 251;
+
+struct Session {
+    left: i64,                       // body bytes still to send
+    at: i64,                         // body bytes already sent
+    req: u8[..512],
+    done: bool,
+    room_probe: bool,                // /room: the probe is running
+    fresh: i64, after1000: i64,
+}
+
+var LISTEN: u8[>..] = [];
+
+fn pump(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn) {
+    while s.left > 0 {
+        let n = if s.left < 16384 { s.left } else { 16384 };
+        var piece: u8[16384] = [0; 16384];
+        for k in n { piece[k] = ((s.at + k) % PERIOD) as! u8; }
+        if !w.send(conn, piece[..n]) { return; }
+        s.left -= n; s.at += n;
+    }
+    if !s.done { s.done = true; w.shutdown_write(conn); }
+}
+
+fn room_probe(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn) {
+    // first call: measure, send 1000 bytes, measure, then fill the queue until send says no
+    if !s.room_probe {
+        s.room_probe = true;
+        s.fresh = w.send_room(conn);
+        var k: u8[1000] = [7; 1000];
+        w.send(conn, k[..]);
+        s.after1000 = w.send_room(conn);
+        var big: u8[16384] = [9; 16384];
+        while w.send(conn, big[..]) { }
+        print("ROOM fresh=", s.fresh, " after1000=", s.after1000, " full=", w.send_room(conn));
+        return;                                   // the rest on Writable
+    }
+    print("ROOM after_drain=", w.send_room(conn));
+    w.close(conn);
+}
+
+fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32, bytes: const u8[:]) {
+    if user == 0 || (user - 1) as i64 >= sessions.items.len { return; }
+    let s .= sessions.items[(user - 1) as i64];
+    if s.req.len + bytes.len > s.req.cap { w.close(conn); return; }
+    s.req.append(bytes);
+    let end = find(s.req, "\r\n\r\n");
+    if end < 0 || s.left > 0 || s.done { return; }
+    let line = s.req[..find(s.req, "\r\n")];
+    let target = line[4..find(line[4..], " ") + 4];
+    if target == "/room" { room_probe(w, s, conn); return; }
+    var skip: i64 = 1;
+    var keep = true;
+    if target.len > 7 && target[..7] == "/plain/" { skip = 7; keep = false; }
+    let n, ok = parse_int(target[skip..]);
+    if !ok { w.close(conn); return; }
+    if keep { w.set_keep_open_on_eof(conn, true); }
+    s.left = n; s.at = 0;
+    pump(w, s, conn);
+}
+
+fn on_writable(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32) {
+    if user == 0 || (user - 1) as i64 >= sessions.items.len { return; }
+    let s .= sessions.items[(user - 1) as i64];
+    if s.room_probe { room_probe(w, s, conn); } else { pump(w, s, conn); }
+}
+
+thread_fn worker(cfg: tcprouter::Config, index: i64) {
+    var sessions = slot_pool<Session> {};
+    var w = tcprouter::Worker { .. };
+    if !w.start(cfg, index) { write_stderr(str("halfclose_server: ", w.error, "\n")); return; }
+    print("READY");
+    w.serve() { w, ev =>
+        match ev {
+            Opened o => {
+                let id = sessions.alloc_index(Session { left: 0, at: 0, req: [], done: false, room_probe: false, fresh: 0, after1000: 0 });
+                w.set_user(o.conn, (id + 1) as u32);
+            },
+            Data d => { on_data(w, sessions, d.conn, d.user, d.bytes); },
+            Writable x => { on_writable(w, sessions, x.conn, x.user); },
+            PeerEof e => { print("PEER_EOF"); },
+            Closed c => {
+                print("CLOSED why=", c.why);
+                if c.user > 0 && (c.user - 1) as i64 < sessions.items.len { sessions.free((c.user - 1) as i64); }
+            },
+            _ => {},
+        }
+    };
+}
+
+fn main() {
+    let a = args();
+    var i = 1;
+    while i + 1 < a.len {
+        if a[i] == "--listen" { LISTEN.append(a[i + 1]); }
+        i += 2;
+    }
+    var cfg = tcprouter::Config { .. };
+    cfg.listeners.push(tcprouter::Listener { id: 1, addr: tcprouter::addr(LISTEN) });
+    cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Handle { tag: 7 }));
+    var problems: u8[>..] = [];
+    if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
+    let ids = tcprouter::spawn(cfg, 1, worker);
+    tcprouter::wait_for_signal_then_drain(1000);
+}

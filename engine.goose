@@ -26,6 +26,8 @@ enum Event {
     Data { conn: Conn, user: u32, bytes: const u8[:] },
     // Your earlier sends have drained below the low-water mark; send again.
     Writable { conn: Conn, user: u32 },
+    // The peer finished sending (EOF); only for a connection that called set_keep_open_on_eof. You can still send; call shutdown_write or close when done.
+    PeerEof { conn: Conn, user: u32 },
     // Always the last event of a connection, exactly once.
     Closed { conn: Conn, user: u32, why: CloseReason },
     // At least every 100 ms while the worker runs: your timers.
