@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0 (unreleased until the RT-6f load gate passes)
+## v0.2.0 (2026-11-12)
 
 For tcpproxy and Gatekeeper. The API additions are small; **every policy type must now define `on_message`, and every `Pick.To` needs `connect_ms`.**
 
