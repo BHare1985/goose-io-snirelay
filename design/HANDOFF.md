@@ -83,3 +83,10 @@ NOT done: the RT-6f gate under load (a queued job never started and was removed:
 the final commit, under `~/dev/docker/tools/run-locked.sh`), and the tag. Steve's ruling: tag v0.2.0 only AFTER the load gate passes; put RT-8c (`drain_test`) and the
 `tls_support_test` early close in the tag message as known issues with test names; after the tag RT-8c is the next item. design/07 PX-2a now says the passive skip is one check
 interval (1 s by default), per Bryan. Bryan pins a3a5f2c until the tag exists.
+
+## Priority change 2026-11-12 (Charlie, via Steve)
+
+Next-session order: 1) the RT-6f load gate (under run-locked.sh, from a worktree of the final commit); 2) tag v0.2.0 and move v0 (known issues named in the tag message:
+`drain_test` RT-8c and the `tls_support_test` early close); 3) **`w.dial(addr, tag) -> Conn` (v0.3), moved up: red gate first (`~/dev/skein/docs/dial-red-gate.md`, 9+1 checks), then green**,
+because Milli's million-users entry on skein needs it for non-blocking Postgres; 4) the rest: RT-8c, then G-1 `shutdown_write`/`close_after_drain` + `send_room`, `w.draining()`.
+`send()` on a dialled connection before `Opened` returns false and queues nothing (Charlie's ruling; document it in design/02). Sprint 3 is unaffected; tcpproxy does not use dial.
