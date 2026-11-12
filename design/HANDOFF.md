@@ -90,3 +90,5 @@ Next-session order: 1) the RT-6f load gate (under run-locked.sh, from a worktree
 `drain_test` RT-8c and the `tls_support_test` early close); 3) **`w.dial(addr, tag) -> Conn` (v0.3), moved up: red gate first (`~/dev/skein/docs/dial-red-gate.md`, 9+1 checks), then green**,
 because Milli's million-users entry on skein needs it for non-blocking Postgres; 4) the rest: RT-8c, then G-1 `shutdown_write`/`close_after_drain` + `send_room`, `w.draining()`.
 `send()` on a dialled connection before `Opened` returns false and queues nothing (Charlie's ruling; document it in design/02). Sprint 3 is unaffected; tcpproxy does not use dial.
+
+w.dial extra check (Milli via Charlie, 2026-11-12): 500 small `send()`s queued back-to-back on a dialled connection (Postgres pipelining), a stalled peer fills the queue (send returns false), drain, `Writable` resumes it, bytes in order; same send queue as client connections.
