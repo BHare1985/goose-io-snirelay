@@ -92,3 +92,10 @@ because Milli's million-users entry on skein needs it for non-blocking Postgres;
 `send()` on a dialled connection before `Opened` returns false and queues nothing (Charlie's ruling; document it in design/02). Sprint 3 is unaffected; tcpproxy does not use dial.
 
 w.dial extra check (Milli via Charlie, 2026-11-12): 500 small `send()`s queued back-to-back on a dialled connection (Postgres pipelining), a stalled peer fills the queue (send returns false), drain, `Writable` resumes it, bytes in order; same send queue as client connections.
+
+## Update 2026-11-12 (later): v0.2.0 tagged, w.dial done
+
+v0.2.0 and v0 are tagged and pushed (f54cf75; RT-6f 100/100 under load, 75 min 53 s). `w.dial` is on main: red 77eba44 (stub, 11 of 15 failed on assertions), implementation 9d37436
+(dial_test 17/17; full suite 38 files, 0 failed on that run). No v0.3 tag yet (Steve/Charlie decide). Next, in order: RT-8c (`drain_test`, loop it under strace with a timestamped log; my untested
+guess is a recycled port on a busy host), then G-1 `shutdown_write`/`close_after_drain` + `w.send_room(conn) -> i64`, then `w.draining() -> bool`. Library lines at 9d37436: Goose 2534, C 223
+(the commit message says 2548, the red commit 2450 instead of 2451: both wrong, corrected here).
