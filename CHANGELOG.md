@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.0 (unreleased until the RT-6f load gate passes)
+
+For tcpproxy and Gatekeeper. The API additions are small; **every policy type must now define `on_message`, and every `Pick.To` needs `connect_ms`.**
+
+* Policy hook `w.serve(policy)`: `pick`, `connect_failed`, `connected`, `closed`, `on_message` (RT-13a to RT-13k). Policy calls are queued and made between event batches.
+* `Message` is 64 bytes. New messages: `ReplaceDeadline` (exact deadline; 0 = unfenced, RT-6f), `SetAddr` (RT-10c), `Policy` (RT-13g to RT-13j; a Stats reply is ordered behind earlier Policy messages).
+* A full deadline table fails closed: the 65th tag, and every tag without an entry, is fenced (RT-6g). The deadline table, `Config.fenced_tags` and `Stats.tags` hold 64 tags (were 16, and a 17th deadline was dropped silently).
+* `Pick.To.connect_ms`: a connect timeout per pick (RT-13k).
+* `wait_for_signal() -> i32` (SIGTERM, SIGINT and SIGUSR1) and `drain(deadline_ms) -> i64` (sessions closed at the deadline); `wait_for_signal_then_drain` is a wrapper (RT-8d, RT-8e).
+* Licence: `MIT OR Apache-2.0`.
+
+**Known issues** (not understood; full suite on this code: 35 of 37 test files pass):
+* `drain_test` RT-8c "SIGTERM closes the listener at once": fails about 1 run in 25. Next item after the tag.
+* `tls_support_test` fence check: once in a full run the stream ended before the deadline (0 late bytes, the safe direction).
+
 ## v0.1.0 (2026-11-09)
 
 First release.
