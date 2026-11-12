@@ -1,6 +1,6 @@
 # Building an HTTP server on tcprouter
 
-> **Licence note:** gslib (github.com/SorinS/gslib) has no licence yet, so it is not redistributable. It is fetched at a pinned commit and never vendored here; do not redistribute binaries built with it until it has a licence.
+> **Licence note:** gslib (github.com/SorinS/gslib) is now Apache-2.0 upstream (LICENSE added in its commit 84ac839; verify the commit you pin contains it). It is fetched at a pinned commit and never vendored here.
 
 For an agent (or a person) who has to write an HTTP/1.1 server, or any server speaking its own protocol, on tcprouter. Read
 this first, then copy [examples/http_server.goose](../examples/http_server.goose); it is complete, tested

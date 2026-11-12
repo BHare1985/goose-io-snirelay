@@ -102,6 +102,5 @@ tests/coverage.sh           # requirement rows that no test proves yet
 ## Licence
 
 SPDX-License-Identifier: `MIT OR Apache-2.0`. Choose either: see [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
-Code you import keeps its own licence. In particular **gslib** (github.com/SorinS/gslib), used only by the TLS support check in
-`tests/net/harness/tls_server.goose` and described in [docs/tls-support.md](docs/tls-support.md), has no licence yet: it is **not
-redistributable** until it has one, so it is never vendored here and anything built with it must not be redistributed.
+Code you import keeps its own licence. **gslib** (github.com/SorinS/gslib), used only by the TLS support check in `tests/net/harness/tls_server.goose` and described in
+[docs/tls-support.md](docs/tls-support.md), is now licensed Apache-2.0 upstream (LICENSE added in its commit 84ac839; check the version you pin). It is still never vendored here.

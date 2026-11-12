@@ -1,6 +1,6 @@
 # Can tcprouter carry gslib's TLS? A support check (not a finished HTTPS server)
 
-> **Licence note:** gslib (github.com/SorinS/gslib) has no licence yet, so it is not redistributable. It is fetched at a pinned commit and never vendored here; do not redistribute binaries built with it until it has a licence.
+> **Licence note:** gslib (github.com/SorinS/gslib) is now Apache-2.0 upstream (LICENSE added in its commit 84ac839; verify the commit you pin contains it). It is fetched at a pinned commit and never vendored here.
 
 **Decision (the user's):** TLS termination will use **gslib** (`github.com/SorinS/gslib`), pure Goose, sans-I/O. This page records only whether
 tcprouter gives it what it needs. It is not an HTTP router and `examples/http_server` stays minimal; small details come later.
