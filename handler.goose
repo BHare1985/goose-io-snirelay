@@ -54,8 +54,94 @@ fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool {
     true
 }
 
-// Closes after the queued bytes are sent.
+// Opens a connection to `addr` ("host:port") from this worker and returns its handle at once; the connect never blocks (RT-14).
+// The handle is a Conn like any other. Events, in order: Opened when the connect finished (nothing is ever delivered before it), then Data,
+// Writable and Closed as for an accepted connection. If the connect fails (refused, unreachable, `connect_ms` passed: 0 means
+// Limits.connect_timeout_ms) or the tag is fenced, there is no Opened and exactly one Closed, with why = ConnectFailed or Fenced.
+// `send` on the Conn BEFORE Opened returns false and queues nothing: wait for Opened, as for Writable. A dialled connection counts toward
+// max_conns_per_worker, obeys the idle timeout, and can be tagged and fenced (RT-6) like an accepted one. `close` before Opened cancels it.
+fn dial(w: Worker&, addr: const u8[:], tag: u16, connect_ms: i64) -> Conn {
+    var i: i64 = 0;
+    var gen: u32 = 1;
+    if w._free_slots.len > 0 {
+        i = w._free_slots.pop();
+        gen = w._connection_slots[i].gen;
+        w._connection_slots[i] = _fresh_slot(gen, -1, 0, false, w._now_ms);
+    } else {
+        i = w._connection_slots.len;
+        w._connection_slots.push(_fresh_slot(gen, -1, 0, false, w._now_ms));
+    }
+    let s .= w._connection_slots[i];
+    s.state = _STATE_DIALING;
+    s.tag = tag;
+    s.connect_ms = connect_ms;
+    w._stats.open++;
+    w._dialing++;
+    w._note_dial_due(w._now_ms + (if connect_ms > 0 { connect_ms } else { w.cfg.limits.connect_timeout_ms }));
+    let conn = Conn { slot: i as u32, gen: s.gen };
+    if w._stats.open > w.cfg.limits.max_conns_per_worker { w._close_connection(i, CloseReason.ConnectFailed); return conn; }
+    if !w._tag_allows(tag) { w._close_connection(i, CloseReason.Fenced); return conn; }
+    var p = _ParsedAddress { false, [0; 16], 0 };
+    if !_parse_address(addr, p) { w._close_connection(i, CloseReason.ConnectFailed); return conn; }
+    let fd = c_connect_start(p.v6, p.ip, p.port);
+    if fd < 0 { w._close_connection(i, CloseReason.ConnectFailed); return conn; }
+    s.client_fd = fd;
+    s.client_mask = c_EPOLLOUT;                      // level-triggered: the connect finishing makes the socket writable (or errored)
+    if c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, fd, c_EPOLLOUT, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen)) < 0 {
+        w._close_connection(i, CloseReason.Error);
+        return conn;
+    }
+    s.client_registered = true;
+    conn
+}
+
+// Connect timeouts of dials are per connection and many dials share a tag, so the per-tag deadline table cannot express them. Instead the
+// worker remembers the earliest connect deadline and the loop sleeps no longer than that: nothing wakes it while no dial is pending.
+fn _note_dial_due(w: Worker&, due: i64) {
+    if w._dial_due == 0 || due < w._dial_due { w._dial_due = due; }
+}
+
+// How long epoll_wait may sleep: 100 ms, or less when a dial's connect deadline comes sooner.
+fn _wait_limit(w: Worker&) -> i32 {
+    if w._dialing <= 0 { return 100; }
+    let until = w._dial_due - c_boottime_ms();
+    if until <= 0 { 0 } else if until < 100 { until as i32 } else { 100 }
+}
+
+// Closes (ConnectFailed) the dials whose own connect timeout has passed, and finds the next deadline among the rest.
+fn _expire_dials(w: Worker&, now: i64) {
+    var next: i64 = 0;
+    for i in w._connection_slots.len {
+        let s .= w._connection_slots[i];
+        if !s.live || s.state != _STATE_DIALING { continue; }
+        let allowed = if s.connect_ms > 0 { s.connect_ms } else { w.cfg.limits.connect_timeout_ms };
+        let due = s.started_ms + allowed;
+        if now >= due { w._close_connection(i, CloseReason.ConnectFailed); }
+        else if next == 0 || due < next { next = due; }
+    }
+    w._dial_due = next;
+}
+
+// The connect of a dialled connection finished (or failed): Opened, or the one Closed.
+fn _dial_finished(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    if c_connect_result(s.client_fd) != 0 { w._close_connection(i, CloseReason.ConnectFailed); return; }
+    if !w._tag_allows(s.tag) { w._close_connection(i, CloseReason.Fenced); return; }
+    w._dialing--;
+    if w._dialing == 0 { w._dial_due = 0; }          // nothing left to time: no stale deadline for the next dial to inherit
+    s.state = _STATE_HANDLING;
+    s.started_ms = w._now_ms;
+    s.last_active_ms = w._now_ms;
+    w._queue_event(_PENDING_OPENED, i);
+    w._update_epoll_interest(i);                       // now level-triggered input (and output when something is queued)
+}
+
+// Closes after the queued bytes are sent. On a dial that has not opened yet it cancels the dial (a Closed follows).
 fn close(w: Worker&, c: Conn) {
+    if c.slot < w._connection_slots.len {
+        let d .= w._connection_slots[c.slot];
+        if d.live && d.gen == c.gen && d.state == _STATE_DIALING { w._close_connection(c.slot as i64, CloseReason.ByHandler); return; }
+    }
     let i = w._handler_slot(c);
     if i >= 0 { w._begin_close(i, CloseReason.ByHandler); }
 }
@@ -71,13 +157,13 @@ fn reset(w: Worker&, c: Conn) {
 
 // Your own id for this connection, returned in every later event. tcprouter stores only the u32.
 fn set_user(w: Worker&, c: Conn, user: u32) {
-    let i = w._handler_slot(c);
+    let i = w._user_slot(c);
     if i >= 0 { w._connection_slots[i].user = user; }
 }
 
 // The id set with set_user, or 0 if none was set or the connection is gone.
 fn user(w: Worker&, c: Conn) -> u32 {
-    let i = w._handler_slot(c);
+    let i = w._user_slot(c);
     if i >= 0 { w._connection_slots[i].user } else { 0 }
 }
 
@@ -142,6 +228,15 @@ fn _handler_slot(w: Worker&, c: Conn) -> i64 {
     if c.slot >= w._connection_slots.len { return -1; }
     let s .= w._connection_slots[c.slot];
     if !s.live || s.gen != c.gen || s.state != _STATE_HANDLING { return -1; }
+    c.slot
+}
+
+// Like _handler_slot, but a dial still in progress counts too: set_user and user work on a Conn as soon as dial returns it,
+// while send and the rest wait for Opened.
+fn _user_slot(w: Worker&, c: Conn) -> i64 {
+    if c.slot >= w._connection_slots.len { return -1; }
+    let s .= w._connection_slots[c.slot];
+    if !s.live || s.gen != c.gen || (s.state != _STATE_HANDLING && s.state != _STATE_DIALING) { return -1; }
     c.slot
 }
 
@@ -277,25 +372,4 @@ fn _begin_close(w: Worker&, i: i64, reason: CloseReason) {
     s.closing = true;
     s.closing_reason = reason;
     w._flush_output(i);
-}
-
-// STUB (red gate only, replaced by the implementation in the next commit): a dial that closes at once as ConnectFailed, so that the gate compiles
-// and every RT-14 row fails on its own assertion.
-fn dial(w: Worker&, addr: const u8[:], tag: u16, connect_ms: i64) -> Conn {
-    var i: i64 = 0;
-    var gen: u32 = 1;
-    if w._free_slots.len > 0 {
-        i = w._free_slots.pop();
-        gen = w._connection_slots[i].gen;
-        w._connection_slots[i] = _fresh_slot(gen, -1, 0, false, w._now_ms);
-    } else {
-        i = w._connection_slots.len;
-        w._connection_slots.push(_fresh_slot(gen, -1, 0, false, w._now_ms));
-    }
-    let s .= w._connection_slots[i];
-    s.state = _STATE_HANDLING;
-    w._stats.open++;
-    let conn = Conn { slot: i as u32, gen: s.gen };
-    w._close_connection(i, CloseReason.ConnectFailed);
-    conn
 }

@@ -25,6 +25,7 @@ import .route;
 import .sni;
 import os;
 
+let _STATE_DIALING: u8 = 5;          // w.dial: the outbound connect is in progress; the user's code gets Opened when it finishes (handler.goose)
 let _STATE_HANDLING: u8 = 4;         // Action.Handle: the user's code owns the connection through events
 let _STATE_INSPECTING: u8 = 3;       // an inspect: Sni listener: waiting for the ClientHello, which stays queued in the kernel
 let _STATE_CONNECTING: u8 = 1;       // the connect to the server is in progress; the client is not read yet
@@ -254,7 +255,8 @@ fn _close_connection(w: Worker&, i: i64, reason: CloseReason) {
     if !s.live { return; }
     if s.client_fd >= 0 { c_close(s.client_fd); }
     if s.server_fd >= 0 { c_close(s.server_fd); }
-    if s.state == _STATE_HANDLING { w._queue_closed(i, reason); }
+    if s.state == _STATE_DIALING { w._dialing--; if w._dialing == 0 { w._dial_due = 0; } }
+    if s.state == _STATE_HANDLING || s.state == _STATE_DIALING { w._queue_closed(i, reason); }     // a dial that never opened still gets its Closed (RT-14c)
     if s.policy_connected { w._queue_policy_closed(i, reason); }
     for k in s.out_count { w._give_back_buffer(s.out_buffers[k]); }
     if s.override_target >= 0 { w._override_targets[s.override_target].addrs.clear(); }
@@ -738,6 +740,10 @@ fn _dispatch_event(w: Worker&, data: u64, events: u32) {
     if s.state == _STATE_INSPECTING {
         if (events & c_EPOLLERR) != 0 { w._close_connection(slot, CloseReason.PeerReset); return; }
         if kind == _EVENT_KIND_CLIENT { w._inspect_connection(slot); }           // input, or the peer ended
+        return;
+    }
+    if s.state == _STATE_DIALING {
+        if kind == _EVENT_KIND_CLIENT { w._dial_finished(slot); }                // success, refusal or error: the socket says which
         return;
     }
     if s.state == _STATE_HANDLING {

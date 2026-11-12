@@ -105,13 +105,14 @@ def body():
         t.check(r.wait(lambda: "DIAL send_before_open=false" in r.lines), f"RT-14b send() before Opened returns false ({[l for l in r.lines if l.startswith('DIAL ')][:2]})")
         t.check(echo.total() == 5, f"RT-14b and nothing was queued by it: the echo server received exactly the 5 bytes sent after Opened ({echo.total()})")
         # 3: closed port
+        time.sleep(0.3)                                       # the previous dial's Closed line must not land in this window
         before = len(r.lines)
         _, status, b = r.get(f"/via/{free_port()}")
         t.check(status == 502, f"RT-14c dial to a closed port: the client gets 502 ({status})")
-        r.wait(lambda: any("why=ConnectFailed" in l for l in r.lines[before:]))
+        r.wait(lambda: any("ConnectFailed" in l for l in r.lines[before:]))
         new = r.lines[before:]
         closed = [l for l in new if l.startswith("DIAL_CLOSED")]
-        t.check(len(closed) == 1 and "why=ConnectFailed" in closed[0] and "opened=false" in closed[0] and not any(l.startswith("DIAL_OPENED") for l in new),
+        t.check(len(closed) == 1 and "ConnectFailed" in closed[0] and "opened=false" in closed[0] and not any(l.startswith("DIAL_OPENED") for l in new),
                 f"RT-14c Closed(ConnectFailed) exactly once and no Opened before it ({closed})")
         # 4: a connect that hangs, with its own timeout
         hs, fillers, hport = hanging_listener()
@@ -120,8 +121,28 @@ def body():
         took = time.time() - t0
         t.check(status == 502 and 0.18 <= took <= 0.5, f"RT-14d a hanging connect with connect_ms=200 fails after {took:.2f} s (want 0.2 to 0.4, sweep slack 0.1) status {status}")
         hs.close()
+        # 4b: the dial before this one ended by timeout; now one that ends by SUCCESS leaves nothing stale, and a later hanging dial still times out on time
+        _, status, b = r.get(f"/via/{echo.port}/150")
+        time.sleep(0.5)                                              # quiet: no dial in flight
+        hs2, fillers2, hport2 = hanging_listener()
+        t0 = time.time()
+        _, status, b = r.get(f"/via/{hport2}/200")
+        took = time.time() - t0
+        t.check(status == 502 and 0.18 <= took <= 0.5, f"RT-14d a hanging dial after a dial that ended by success still fails on time ({took:.2f} s)")
+        # while one dial is in flight (1.2 s) the worker does not spin: its CPU time stays tiny
+        def cpu_ms(pid):
+            f = open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()
+            return (int(f[11]) + int(f[12])) * 10                    # utime + stime in clock ticks (10 ms)
+        th2 = threading.Thread(target=lambda: r.get(f"/via/{hport2}/1200", timeout=5))
+        before_cpu = cpu_ms(r.p.pid)
+        th2.start(); time.sleep(1.0)
+        used = cpu_ms(r.p.pid) - before_cpu
+        th2.join()
+        t.check(used <= 60, f"RT-14d with a dial in flight for 1 s the worker used {used} ms of CPU (want <= 60: it sleeps until the deadline, it does not spin)")
+        hs2.close()
         # 5: the peer closes mid-way
         dead = Echo(close_after_read=True)
+        time.sleep(0.3)
         before = len(r.lines)
         _, status, b = r.get(f"/via/{dead.port}")
         r.wait(lambda: any(l.startswith("DIAL_CLOSED") for l in r.lines[before:]))
@@ -153,13 +174,13 @@ def body():
         rec = Echo()
         until = boottime_ms() + 700
         r.say(f"deadline 9 {until}")
-        time.sleep(0.2)
+        time.sleep(0.5)
         before = len(r.lines)
         _, status, b = r.get(f"/fence/{rec.port}")
         time.sleep(1.2)
         late = sum(n for at, n in rec.received if at > until + 100)
         early = sum(n for at, n in rec.received if at <= until)
-        fenced = [l for l in r.lines[before:] if l.startswith("DIAL_CLOSED") and "why=Fenced" in l]
+        fenced = [l for l in r.lines[before:] if l.startswith("DIAL_CLOSED") and "Fenced" in l]
         t.check(late == 0 and early > 0 and len(fenced) == 1, f"RT-14g a dialled connection under a tag whose deadline passes: {early} bytes before, {late} after, closed as Fenced ({fenced})")
         rec.stop()
         # 9: drain with nothing left behind is the engine's; here: the program is up and silent

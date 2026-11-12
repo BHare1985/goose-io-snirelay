@@ -102,6 +102,8 @@ root struct Worker {
     _draining: bool = false,
     _drain_deadline_ms: i64 = 0,
     _tags: _TagEntry[..64] = [],                 // deadlines per tag (messages.goose)
+    _dialing: i64 = 0,                           // dialled connections whose connect is still in progress (handler.goose: dial)
+    _dial_due: i64 = 0,                          // the earliest connect deadline among them (0 = none known): the loop wakes then, never earlier for this
     _tags_full: bool = false,                    // a deadline could not be recorded (table full): every tag without an entry is fenced (RT-6g)
     _deadline_scan_at: i64 = 0,                  // the earliest deadline not yet enforced, or 0
     _now_ms: i64 = 0,                            // CLOCK_BOOTTIME at the start of the current pass of the loop
@@ -165,7 +167,7 @@ fn _serve_loop<P, F>(w: Worker&, p: P&) {
     var last_tick: i64 = 0;
     var last_sweep: i64 = 0;
     loop {
-        let wait_ms: i32 = if w._ready_head < w._ready.len || w._policy_head < w._policy_requests.len { 0 } else { 100 };     // work left over: do not sleep
+        let wait_ms: i32 = if w._ready_head < w._ready.len || w._policy_head < w._policy_requests.len { 0 } else { w._wait_limit() };     // work left over: do not sleep
         let n = c_epoll_wait(w._epoll_fd, events[0], 256, wait_ms);
         w._now_ms = c_boottime_ms();
         // Messages first, then deadlines, then events: a drain or a fence must not be outrun by traffic in the same pass.
@@ -186,6 +188,7 @@ fn _serve_loop<P, F>(w: Worker&, p: P&) {
         }
         let now = w._now_ms;
         w._resume_paused_listeners(now);
+        if w._dialing > 0 && now >= w._dial_due { w._expire_dials(now); }
         if now - last_sweep >= 250 {
             last_sweep = now;
             w._sweep_timeouts(now);

@@ -246,3 +246,18 @@ How a message reaches every worker, given one queue per type is shared [V]: a pi
 - **Peer behaviour** (resets, garbage, timeouts) is never an error to the program: it is a
   `Closed { why }` event and a counter. The engine must never `abort` on anything a peer sends
   (goose-kb rule NEVER-4).
+
+
+## 7. Outbound handler connections: `dial` (v0.3, RT-14)
+
+```goose
+fn dial(w: Worker&, addr: const u8[:], tag: u16, connect_ms: i64) -> Conn   // never blocks; the Conn is valid at once
+```
+
+The same events as an accepted connection: `Opened` when the connect finished, then `Data`, `Writable`, `Closed`. A failed connect (refused,
+unreachable, `connect_ms` passed; 0 = `Limits.connect_timeout_ms`) or a fenced tag gives no `Opened` and exactly one `Closed`, with `why` = `ConnectFailed`
+or `Fenced`, last. **`send` on the Conn before `Opened` returns false and queues nothing** (Charlie's ruling): wait for `Opened`, as you wait for `Writable`.
+`set_user` and `user` work from the moment `dial` returns; `close` before `Opened` cancels the dial (a `Closed` follows). A dialled connection counts toward
+`max_conns_per_worker`, obeys the idle timeout, can be tagged and fenced (RT-6), and uses the same 4-buffer send queue as an accepted one, so pipelining works the
+same way (RT-14h: many small sends coalesce in the open buffer; false only when the queue is full, then `Writable` resumes). The connect timeout is per connection, so
+it is not a tag deadline: the worker remembers the earliest one and the loop sleeps no longer than that (nothing wakes it while no dial is pending).

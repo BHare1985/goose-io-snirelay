@@ -157,12 +157,12 @@ Row numbers RT-13a to f are Brian's proposal (Bryan's README left them for Charl
 
 | id | Behaviour | Release | Test | Status |
 |---|---|---|---|---|
-| RT-14a | `dial(addr, tag, connect_ms) -> Conn` returns at once; Opened arrives when the connect finished; Data/Writable/Closed as for an accepted connection; a round trip works | v0.3 | `dial_test` | red |
-| RT-14b | `send` on a dialled connection before Opened returns false and queues nothing (Charlie's ruling) | v0.3 | `dial_test` | red |
-| RT-14c | A refused connect: no Opened, exactly one Closed with why = ConnectFailed, last | v0.3 | `dial_test` | red |
-| RT-14d | `connect_ms` is the dial's own connect timeout (0 = Limits.connect_timeout_ms): a hanging connect fails at that time (0.2 to 0.4 s for 200 ms) | v0.3 | `dial_test` | red |
-| RT-14e | The peer closes a dialled connection: one Closed, the handler frees its state | v0.3 | `dial_test` | red |
-| RT-14f | A dial never blocks the worker: while a reply is 600 ms away other requests are answered within 50 ms | v0.3 | `dial_test` | red |
-| RT-14g | A dialled connection can be tagged and fenced: no byte after the deadline, closed as Fenced | v0.3 | `dial_test` | red |
-| RT-14h | Pipelining: 500 small sends back to back are all accepted (same send queue as accepted connections); a stalled peer fills the queue (send false), Writable resumes it, bytes in order (Milli) | v0.3 | `dial_test` | red |
-| RT-14i | 200 concurrent dials across 2 workers all complete; no leaked slots afterwards | v0.3 | `dial_test` | red |
+| RT-14a | `dial(addr, tag, connect_ms) -> Conn` returns at once; Opened arrives when the connect finished; Data/Writable/Closed as for an accepted connection; a round trip works | v0.3 | `dial_test` | green |
+| RT-14b | `send` on a dialled connection before Opened returns false and queues nothing (Charlie's ruling) | v0.3 | `dial_test` | green |
+| RT-14c | A refused connect: no Opened, exactly one Closed with why = ConnectFailed, last | v0.3 | `dial_test` | green |
+| RT-14d | `connect_ms` is the dial's own connect timeout (0 = Limits.connect_timeout_ms): a hanging connect fails at that time (0.2 to 0.4 s for 200 ms) | v0.3 | `dial_test` | green |
+| RT-14e | The peer closes a dialled connection: one Closed, the handler frees its state | v0.3 | `dial_test` | green |
+| RT-14f | A dial never blocks the worker: while a reply is 600 ms away other requests are answered within 50 ms | v0.3 | `dial_test` | green |
+| RT-14g | A dialled connection can be tagged and fenced: no byte after the deadline, closed as Fenced | v0.3 | `dial_test` | green |
+| RT-14h | Pipelining: 500 small sends back to back are all accepted (same send queue as accepted connections); a stalled peer fills the queue (send false), Writable resumes it, bytes in order (Milli) | v0.3 | `dial_test` | green |
+| RT-14i | 200 concurrent dials across 2 workers all complete; no leaked slots afterwards | v0.3 | `dial_test` | green |
