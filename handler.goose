@@ -459,3 +459,6 @@ fn _batch_window(w: Worker&, events: c_EpollEvent[256]&, n: i32, last_tick: i64,
     w._now_ms = c_boottime_ms();
     if m > 0 { m } else { 0 }
 }
+
+// STUB (red gate only, replaced next commit).
+fn want_pass_end(w: Worker&, on: bool) { }

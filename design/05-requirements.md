@@ -198,3 +198,14 @@ Row numbers RT-13a to f are Brian's proposal (Bryan's README left them for Charl
 | RT-16f | Rows: CPU per request and p50/p95 latency with the window on and off (printed); gate: the p95 grows by at most 20 ms | v0.5.0 | `batch_test` | green |
 
 Measured (batch_test, 8 connections, one 64-byte ping-pong every ~4 ms each, window min=8 / wait=2000 us, this host, idle): CPU per request 71 to 79 us off, 66 to 69 us on (about 7 to 12% less); p50 latency 0.18 ms off, 4.3 ms on, p95 0.25 to 0.30 ms off, 4.5 ms on. The saving is modest at this light load; Milli's measurement (49% to 27% CPU) was at a much higher request rate.
+
+## RT-17 End-of-pass signal (`w.want_pass_end`, `Event.PassEnd`; R5 from skein; v0.6.0 because a new Event variant breaks exhaustive matches)
+
+| id | Behaviour | Release | Test | Status |
+|---|---|---|---|---|
+| RT-17a | After `w.want_pass_end(true)` the engine delivers `Event.PassEnd {}` exactly once after the last handler event (Opened, Data, Writable, PeerEof, Closed) of every pass that delivered at least one | v0.6.0 | `passend_test` | red |
+| RT-17b | No PassEnd on a pass where nothing happened (idle passes, Ticks) | v0.6.0 | `passend_test` | green (vacuous until implemented) |
+| RT-17c | One PassEnd after a batching-window wait ends, covering the events it gathered | v0.6.0 | `passend_test` | red |
+| RT-17d | Off by default: never a PassEnd, and no per-pass work | v0.6.0 | `passend_test` | green (vacuous until implemented) |
+| RT-17e | A send during PassEnd takes the normal send path, deadline check included: before the deadline it goes out; after the tag deadline passed it sends 0 bytes and returns false | v0.6.0 | `passend_test` | red |
+| RT-17f | A pass that delivered only a posted Message (control, Policy, Stats) and no handler event gets no PassEnd: Messages, Ticks and policy hooks are NOT handler events | v0.6.0 | `passend_test` | green (vacuous until implemented) |

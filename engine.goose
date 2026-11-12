@@ -28,6 +28,8 @@ enum Event {
     Writable { conn: Conn, user: u32 },
     // The peer finished sending (EOF); only for a connection that called set_keep_open_on_eof. You can still send; call shutdown_write or close when done.
     PeerEof { conn: Conn, user: u32 },
+    // Only after w.want_pass_end(true): the end of a pass that delivered at least one handler event (Opened, Data, Writable, PeerEof, Closed); once per pass, after the last of them. Never on an idle pass, never for a Tick or a posted message alone.
+    PassEnd { },
     // Always the last event of a connection, exactly once.
     Closed { conn: Conn, user: u32, why: CloseReason },
     // At least every 100 ms while the worker runs: your timers.
