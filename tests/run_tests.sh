@@ -64,6 +64,9 @@ if [ -e "${net_drivers[0]}" ]; then
         "$GOOSE" build --debug -o "$work/halfclose_server" tests/net/harness/halfclose_server.goose >"$work/halfclose_server.build.log" 2>&1 \
             && export HALFCLOSE_SERVER="$work/halfclose_server" \
             || { echo "BUILD FAILED  tests/net/harness/halfclose_server.goose"; sed 's/^/    /' "$work/halfclose_server.build.log" | head -20; failed=$((failed + 1)); }
+        "$GOOSE" build --debug -o "$work/batch_server" tests/net/harness/batch_server.goose >"$work/batch_server.build.log" 2>&1 \
+            && export BATCH_SERVER="$work/batch_server" \
+            || { echo "BUILD FAILED  tests/net/harness/batch_server.goose"; sed 's/^/    /' "$work/batch_server.build.log" | head -20; failed=$((failed + 1)); }
         # test-only fast echo backend (C, independent of tcprouter): generation_test needs 100,000 accepts/s
         ${CC:-cc} -O1 -o "$work/echo_server" tests/net/harness/echo_server.c && export ECHO_SERVER="$work/echo_server"
         for drv in "${net_drivers[@]}"; do

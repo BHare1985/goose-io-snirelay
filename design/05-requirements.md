@@ -183,3 +183,16 @@ Row numbers RT-13a to f are Brian's proposal (Bryan's README left them for Charl
 | RT-15h | `w.draining() -> bool` is false until a Drain message reaches the worker, then true; an already-open connection can still ask (a handler can answer 503 and close) | v0.4.1 | `halfclose_test` | green |
 
 `close` already means close-after-drain (it closes once the queued bytes are out), so there is no separate `close_after_drain`.
+
+## RT-16 Batching window (post-v0.4.0; Milli's challenge entry; spec from Steve, approved by Charlie)
+
+`Limits.batch_min_events` and `Limits.batch_max_wait_us`, both 0 = off. When a pass finds fewer events than the minimum the worker waits up to the maximum for more, then processes.
+
+| id | Behaviour | Release | Test | Status |
+|---|---|---|---|---|
+| RT-16a | Off by default (also with only one of the two set): the worker never waits (`Stats.batch_waits` = 0) | v0.5.0 | `batch_test` | green (vacuous until a window exists) |
+| RT-16b | With both set the worker waits: `batch_waits` and `batch_wait_us` count the windows | v0.5.0 | `batch_test` | red |
+| RT-16c | The wait never passes a deadline (the earliest of max_wait, the next Tick/sweep, a tag deadline, `_dial_due`, the drain deadline): a 200 ms window does not delay a tag deadline by more than 60 ms | v0.5.0 | `batch_test` | red-capable (vacuous until a window exists) |
+| RT-16d | A posted message (control, Policy, Drain, Stats) ends the wait at once: a Stats gather with a 200 ms window is as fast as without | v0.5.0 | `batch_test` | red-capable |
+| RT-16e | Fencing is unaffected: zero bytes after a tag deadline that expires during a window | v0.5.0 | `batch_test` | red-capable |
+| RT-16f | Rows: CPU per request and p50/p95 latency with the window on and off (printed); gate: the p95 grows by at most 20 ms | v0.5.0 | `batch_test` | red-capable |

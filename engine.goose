@@ -55,6 +55,8 @@ struct Stats {
     stale_events: i64,        // events for a connection that was already closed and its slot reused (RT-2b)
     bad_events: i64,          // events whose slot index or kind was out of range (RT-2c)
     accept_failures: i64,     // accepts that failed for lack of a resource; the listener rests briefly (RT-1e)
+    batch_waits: i64,         // batching windows entered (RT-16): 0 unless Limits.batch_min_events and batch_max_wait_us are both set
+    batch_wait_us: i64,       // microseconds slept in them
     tags: TagSessions[..64],  // connections open now under each tag (sessions per tag)
 }
 

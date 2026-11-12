@@ -69,6 +69,8 @@ struct Limits {
     max_conns_per_worker: i64 = 65536,
     buffer_size: i64 = 32768,
     buffers_per_worker: i64 = 4096,
+    batch_min_events: i64 = 0,         // batching window (RT-16), OFF when 0: a pass that finds fewer events than this waits up to batch_max_wait_us for more
+    batch_max_wait_us: i64 = 0,        // microseconds; 0 = off. Never waits past a deadline; a posted message ends the wait at once
 }
 
 struct Config {
