@@ -180,6 +180,6 @@ Row numbers RT-13a to f are Brian's proposal (Bryan's README left them for Charl
 | RT-15f | A kept-open connection is bounded: the half-close timeout (`Limits.half_close_timeout_ms`) runs from PeerEof; a handler that never finishes is closed with HalfCloseTimeout (red: still open after 6 s) | v0.4.0 | `halfclose_test` | green |
 | RT-15g | Ordering: PeerEof is delivered after every Data of the connection; Closed is last, exactly once; `send` after `shutdown_write` returns false | v0.4.0 | `halfclose_test` | green |
 
-| RT-15h | `w.draining() -> bool` is false until a Drain message reaches the worker, then true; an already-open connection can still ask (a handler can answer 503 and close) | v0.5.0 | `halfclose_test` | red |
+| RT-15h | `w.draining() -> bool` is false until a Drain message reaches the worker, then true; an already-open connection can still ask (a handler can answer 503 and close) | v0.4.1 | `halfclose_test` | green |
 
 `close` already means close-after-drain (it closes once the queued bytes are out), so there is no separate `close_after_drain`.

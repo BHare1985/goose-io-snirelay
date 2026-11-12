@@ -429,5 +429,6 @@ fn send_room(w: Worker&, c: Conn) -> i64 {
     tail_room + fresh * size
 }
 
-// STUB (red gate only, replaced next commit).
-fn draining(w: Worker&) -> bool { false }
+// True once a Drain message has reached this worker (posted by `drain` or wait_for_signal_then_drain): the listeners are closed and the worker ends
+// when its connections have, or at the deadline. A handler can use it to answer new requests on open connections with 503 and close (RT-15h).
+fn draining(w: Worker&) -> bool { w._draining }

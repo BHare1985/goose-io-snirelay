@@ -1,5 +1,11 @@
 # Changelog
 
+**Tags.** `v0` means "the latest compatible release": it does not move across a breaking change (it stays on v0.3.0 because v0.4.0 changed `Event`). Pin an exact tag (`v0.4.0`) to get a breaking release.
+
+## v0.4.1 (unreleased)
+
+* `w.draining() -> bool`: true once a Drain message reached the worker, so a handler can answer new requests on open connections with 503 and close (RT-15h).
+
 ## v0.4.0 (unreleased until the full suite and the load gate pass)
 
 **Breaking for exhaustive matches: `Event` has a new variant, `PeerEof`.** Matches with a `_ =>` arm are unaffected.
