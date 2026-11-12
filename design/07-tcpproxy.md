@@ -38,7 +38,7 @@ MAX_SLOTS). Built and green as policy.goose / RT-13 (Charlie approved the shape,
 |---|---|
 | PX-1a | Pick skips servers that are down or in maintenance; prefers up over degraded; backups only when no primary is up. Order: up primary, degraded primary, up backup, degraded backup; a degraded primary still serves, so it beats an up backup (new: C's pick_slot has no degraded state, proxy.c:873–900) |
 | PX-1b | Round robin across eligible servers per worker |
-| PX-2a | A refused or timed-out connect marks that server "skip" for 2 s (configurable) on this worker and reports the failure upward (D44: the report becomes a Gatus result) |
+| PX-2a | A refused or timed-out connect marks that server skip on this worker for one check interval (1 s by default, `--check-interval`), as the C proxy retries it; the policy's own default is configurable. The failure is reported upward (D44: the report becomes a Gatus result) |
 | PX-2b | Retry the next eligible server until each was tried once |
 | PX-3a | `SetState(server, up/down/degraded/maintenance)` takes effect for new connections at the next loop pass |
 | PX-3b | `SetDeadline(server, D)` with D absolute on BOOTTIME; never extends past a later-arriving earlier D (RT-6d) |

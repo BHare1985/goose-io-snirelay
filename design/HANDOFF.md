@@ -72,3 +72,14 @@ Remaining order before the tag:
 5. After tcpproxy passes 27/27: skein items G-1 `shutdown_write`/`close_after_drain` + `w.send_room`, `w.draining() -> bool`, `w.dial` (v0.3).
 Open: T03 (tls_support_test fence flake, look with RT-8c), the public-release list in TODO.md. Policy types must define `on_message`; every `Pick.To` needs `connect_ms`.
 Known mistake: commit feffc9d says library lines Goose 2373; the real count was 2388 (corrected in 3960a7e's message).
+
+## Update 2026-11-12 (second wrap-up): suite result, what the tag still needs
+
+Full suite on a3a5f2c (code identical to 6244c1a): 37 test files, 2 failed, both KNOWN flakes, neither understood: `drain_test` RT-8c ("SIGTERM closes the listener at
+once (never)", about 1 run in 25; my untested guess is a recycled port on a busy host: another process takes the port the server just freed, so the "connect must be refused"
+check sees a connection succeed) and `tls_support_test` (the fence check, an early close with 0 late bytes: the safe direction). The host was busy with other teams' runs.
+Every other file passed, including policy_message, connect_ms, signal and tag_overflow.
+NOT done: the RT-6f gate under load (a queued job never started and was removed: its wait loop matched its own wrapper; rebuild it as in the 2026-11-11 note, from a worktree at
+the final commit, under `~/dev/docker/tools/run-locked.sh`), and the tag. Steve's ruling: tag v0.2.0 only AFTER the load gate passes; put RT-8c (`drain_test`) and the
+`tls_support_test` early close in the tag message as known issues with test names; after the tag RT-8c is the next item. design/07 PX-2a now says the passive skip is one check
+interval (1 s by default), per Bryan. Bryan pins a3a5f2c until the tag exists.
