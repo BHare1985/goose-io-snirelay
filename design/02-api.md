@@ -261,3 +261,8 @@ or `Fenced`, last. **`send` on the Conn before `Opened` returns false and queues
 `max_conns_per_worker`, obeys the idle timeout, can be tagged and fenced (RT-6), and uses the same 4-buffer send queue as an accepted one, so pipelining works the
 same way (RT-14h: many small sends coalesce in the open buffer; false only when the queue is full, then `Writable` resumes). The connect timeout is per connection, so
 it is not a tag deadline: the worker remembers the earliest one and the loop sleeps no longer than that (nothing wakes it while no dial is pending).
+
+**`addr` is an IP and a port ("127.0.0.1:5432", "[::1]:5432"), never a host name, on purpose:** a name lookup inside the worker would block its loop (RT-14f is about
+exactly that). Resolve names before or outside the worker: once at start, or on a resolver thread that posts the address to the workers in a message
+(`Message.Policy` carries up to 48 bytes) and keep the address in your own state.
+

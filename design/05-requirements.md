@@ -92,6 +92,7 @@ Columns: id · behaviour · priority · test · status.
 | RT-8c | SIGTERM and SIGINT start a drain (via `wait_for_signal_then_drain`) | v1 | `drain_test` | green |
 | RT-8d | `wait_for_signal() -> i32` blocks until SIGTERM, SIGINT or SIGUSR1 and returns its number; `wait_for_signal_then_drain` is a wrapper over it and `drain` | post-v0.1.0 | `signal_test` | green |
 | RT-8e | `drain(deadline_ms) -> i64` returns the number of open sessions closed at the deadline (0 = every session ended by itself); sessions that end during the drain are not counted; every worker reports once, also one that failed to start | post-v0.1.0 | `signal_test` | green |
+| RT-8f | KNOWN KERNEL BEHAVIOUR, measured, not gating: during a drain a connect that arrives in the instant a worker's SO_REUSEPORT listener closes can be dropped and retried by the client after 1 s. RT-8a and RT-8c assert the listener is gone (no listener for the port, asked of the kernel with `ss`; reading /proc/net/tcp measured the reader, 64 ms per read on a busy host) within 0.3 s; `drain_stall_test` reports how often the first connect stalls (3 of 120 once, then 0 of 600) | post-v0.1.0 | `drain_stall_test` | measured |
 
 ## RT-9 Handler mode
 

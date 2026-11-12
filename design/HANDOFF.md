@@ -103,3 +103,5 @@ guess is a recycled port on a busy host), then G-1 `shutdown_write`/`close_after
 v0.3.0 is tagged and pushed (tag ae0c6f1, commit ac76768; dial_test 20/20 under load). The `v0` tag still points at v0.2.0 (f54cf75): my force-push to move it was refused by the permission check and is with the user. Until they decide, consumers pin v0.3.0 (Milli: tag ae0c6f1, commit ac76768).
 
 RT-8c investigation (2026-11-12): reproduced once (3 of 120 looped runs: the first connect probe after SIGTERM hung for its whole 1 s timeout, neither accepted nor refused); 0 failures in the next 600. Hypothesis unproven: a SYN to a SO_REUSEPORT listener that is mid-close is dropped and retried after 1 s, so the test's connect probe cannot see "listener closed"; the likely fix is a test change (look at /proc/net/tcp for state 0A on the port), which needs Charlie's approval. Details in TODO.md T07.
+
+Queued after G-1, send_room and draining (Steve, approved by Charlie, for Milli's challenge entry): a batching window, `batch_min_events` / `batch_max_wait_us`, default off; rules and tests in TODO.md T26.

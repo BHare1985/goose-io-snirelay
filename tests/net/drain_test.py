@@ -7,7 +7,7 @@
 # `drain MS` comes in on forward_server's control thread (--control) as a Message.Drain posted to every worker; SIGTERM and SIGINT
 # come to a forward_server without --control, whose main calls wait_for_signal_then_drain(--drain-ms). "Exits" means the process
 # ends with status 0.
-import os, signal, socket, sys, time
+import os, signal, socket, subprocess, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "harness"))
 from netlib import *
 
@@ -29,12 +29,22 @@ def ping(c):
     c.sendall(b"ping")
     return recv_exact(c, 4) == b"ping"
 
+def listening(port):
+    """True if some socket listens on the port. Asked of the kernel with a port filter (`ss`, sock_diag), not by reading /proc/net/tcp: that file
+    lists every socket of the host (28,000 lines while another team's load test runs, 60 ms to read), which made this test measure its own reading."""
+    out = subprocess.run(["ss", "-H", "-ltn", f"sport = :{port}"], capture_output=True, text=True).stdout
+    return bool(out.strip())
+
 def wait_refused(port, seconds):
+    """Seconds until nothing listens on the port any more, or None. (Named for what it used to do: it used to probe with connects, but a
+    SYN that reaches an SO_REUSEPORT listener in the instant it closes is dropped by the kernel and retried after 1 s, which a connect
+    probe cannot tell from "still listening": the listener table says what the engine did. The client-visible stalls are measured in
+    drain_stall_test.)"""
     t0 = time.time()
     while time.time() - t0 < seconds:
-        if refused(port):
+        if not listening(port):
             return time.time() - t0
-        time.sleep(0.02)
+        time.sleep(0.005)
     return None
 
 # ----------------------------------------------------------------------------------------------- RT-8a, RT-8b
@@ -50,7 +60,7 @@ def drain_by_command():
         t.check(ping(held), "RT-8a a connection is open and working before the drain")
         a.command("drain 30000")
         took = wait_refused(port, 1.0)
-        t.check(took is not None and took <= 0.3, f"RT-8a after `drain`, the listener is closed at once: a connect is refused ({'%.2fs' % took if took is not None else 'never'})")
+        t.check(took is not None and took <= 0.3, f"RT-8a after `drain`, the listener is closed at once: no LISTEN entry for the port ({'%.2fs' % took if took is not None else 'never'})")
         # A new process on the same port gets every new connection.
         b = Server([f"127.0.0.1:{port}"], [f"127.0.0.1:{bport}"], workers=2, stat_ms=200)
         b.start().wait_ready()
@@ -121,7 +131,7 @@ def drain_by_signal(sig, name):
         t0 = time.time()
         a.proc.send_signal(sig)
         took = wait_refused(port, 1.0)
-        t.check(took is not None and took <= 0.3, f"RT-8c {name} closes the listener at once ({'%.2fs' % took if took is not None else 'never'})")
+        t.check(took is not None and took <= 0.3, f"RT-8c {name} closes the listener at once: no LISTEN entry for the port ({'%.2fs' % took if took is not None else 'never'})")
         t.check(ping(held), f"RT-8c {name}: an open connection keeps working during the drain")
         held.settimeout(4)
         try:
