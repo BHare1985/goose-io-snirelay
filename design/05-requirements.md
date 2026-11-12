@@ -168,12 +168,16 @@ Row numbers RT-13a to f are Brian's proposal (Bryan's README left them for Charl
 | RT-14h | Pipelining: 500 small sends back to back are all accepted (same send queue as accepted connections); a stalled peer fills the queue (send false), Writable resumes it, bytes in order (Milli) | v0.3 | `dial_test` | green |
 | RT-14i | 200 concurrent dials across 2 workers all complete; no leaked slots afterwards | v0.3 | `dial_test` | green |
 
-## RT-15 Graceful close of handler connections (G-1, send_room; post-v0.3.0; consumer: skein)
+## RT-15 Graceful close of handler connections (G-1, send_room; v0.4.0, because the new Event variant PeerEof breaks exhaustive matches; consumer: skein)
 
 | id | Behaviour | Release | Test | Status |
 |---|---|---|---|---|
-| RT-15a | A connection that called `set_keep_open_on_eof` is NOT closed when the peer finishes sending: the engine stops reading, delivers `PeerEof` once, and the handler can keep sending (send, Writable) and finishes with `shutdown_write` or `close`. A client that sends a request and shuts down its write side still receives the whole response, then EOF | v0.3.x | `halfclose_test` | red |
-| RT-15b | Without the opt-in the old behaviour stays: the peer's EOF closes the connection after the queued bytes are flushed; no PeerEof | v0.3.x | `halfclose_test` | red |
-| RT-15c | `shutdown_write(conn)`: after the queue is out, shut down the write side (the peer reads EOF) and keep reading; when the peer has also finished, the connection closes | v0.3.x | `halfclose_test` | red |
-| RT-15d | `send_room(conn) -> i64`: how many bytes `send` would accept now (the free queue room, 4 x buffer_size at most), 0 when full, shrinking by what was sent, back after Writable | v0.3.x | `halfclose_test` | red |
+| RT-15a | A connection that called `set_keep_open_on_eof` is NOT closed when the peer finishes sending: the engine stops reading, delivers `PeerEof` once, and the handler can keep sending (send, Writable) and finishes with `shutdown_write` or `close`. A client that sends a request and shuts down its write side still receives the whole response, then EOF | v0.4.0 | `halfclose_test` | green |
+| RT-15b | Without the opt-in the old behaviour stays: the peer's EOF closes the connection after the queued bytes are flushed; no PeerEof | v0.4.0 | `halfclose_test` | green |
+| RT-15c | `shutdown_write(conn)`: after the queue is out, shut down the write side (the peer reads EOF) and keep reading; when the peer has also finished, the connection closes | v0.4.0 | `halfclose_test` | green |
+| RT-15d | `send_room(conn) -> i64`: how many bytes `send` would accept now (the free queue room, 4 x buffer_size at most), 0 when full, shrinking by what was sent, back after Writable | v0.4.0 | `halfclose_test` | green |
+| RT-15e | Fencing beats half-close: a kept-open connection whose tag deadline expires while the handler is still sending after PeerEof is closed as Fenced, with 0 bytes after the deadline | v0.4.0 | `halfclose_test` | green |
+| RT-15f | A kept-open connection is bounded: the half-close timeout (`Limits.half_close_timeout_ms`) runs from PeerEof; a handler that never finishes is closed with HalfCloseTimeout (red: still open after 6 s) | v0.4.0 | `halfclose_test` | green |
+| RT-15g | Ordering: PeerEof is delivered after every Data of the connection; Closed is last, exactly once; `send` after `shutdown_write` returns false | v0.4.0 | `halfclose_test` | green |
+
 `close` already means close-after-drain (it closes once the queued bytes are out), so there is no separate `close_after_drain`.

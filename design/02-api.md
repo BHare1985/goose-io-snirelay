@@ -266,3 +266,12 @@ it is not a tag deadline: the worker remembers the earliest one and the loop sle
 exactly that). Resolve names before or outside the worker: once at start, or on a resolver thread that posts the address to the workers in a message
 (`Message.Policy` carries up to 48 bytes) and keep the address in your own state.
 
+## 8. Half-close and send room for handler connections (v0.4.0, RT-15)
+
+By default the peer's EOF (it shut down its write side) closes a handler connection after the bytes already queued are flushed (`Closed`, why = PeerClosed). A protocol whose client says
+"that is my whole request" by half-closing, and whose handler is still producing the answer, opts in with `w.set_keep_open_on_eof(conn, true)`: the engine stops reading, delivers
+`Event.PeerEof { conn, user }` once (after every `Data`), and the handler keeps using `send`/`Writable`, finishing with `w.shutdown_write(conn)` (the queue drains, the write side is shut
+down, `send` returns false afterwards, and the connection closes once the peer has finished too) or `w.close(conn)` (closes once the queue is out: this is the close-after-drain, there is no other
+name). The half-close timeout runs from `PeerEof`; a tag fence closes the connection as Fenced even while the handler is still sending. `w.send_room(conn) -> i64` is the number of bytes `send`
+would accept now (at most 4 x `buffer_size`; 0 when full, closing, shut down or a stale handle); a send that the socket takes at once does not use room.
+

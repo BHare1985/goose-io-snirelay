@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.0 (unreleased until the full suite and the load gate pass)
+
+**Breaking for exhaustive matches: `Event` has a new variant, `PeerEof`.** Matches with a `_ =>` arm are unaffected.
+
+* Graceful close for handler connections (RT-15, G-1): `set_keep_open_on_eof(conn, keep)` (opt-in, default off: the old behaviour of closing after the peer's EOF, queued bytes flushed first, is unchanged),
+  `Event.PeerEof { conn, user }` (once, after every Data), `shutdown_write(conn)` (after the queue is out; `send` returns false from then on), `send_room(conn) -> i64`.
+  A kept-open connection is bounded by `Limits.half_close_timeout_ms` from PeerEof and by tag fences (fencing wins). `close` already closes after the queued bytes are out; there is no `close_after_drain`.
+
 ## v0.2.0 (2026-11-12)
 
 For tcpproxy and Gatekeeper. The API additions are small; **every policy type must now define `on_message`, and every `Pick.To` needs `connect_ms`.**

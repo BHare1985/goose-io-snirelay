@@ -20,7 +20,7 @@ fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool {
     let i = w._handler_slot(c);
     if i < 0 { return false; }
     let s .= w._connection_slots[i];
-    if s.closing { return false; }
+    if s.closing || s.wr_shut || s.shut_wr_pending { return false; }
     // Under a tag nothing is sent once its deadline has passed (RT-6a-H). The clock is read here, not taken from the start of
     // the pass: the block may have run for a long time since the pass began.
     if !w._tag_allows(s.tag) { w._close_connection(i, CloseReason.Fenced); return false; }
@@ -198,6 +198,7 @@ let _PENDING_OPENED: u8 = 1;
 let _PENDING_DATA: u8 = 2;
 let _PENDING_WRITABLE: u8 = 3;
 let _PENDING_CLOSED: u8 = 4;
+let _PENDING_EOF: u8 = 5;
 
 struct _PendingEvent {
     kind: u8,
@@ -261,6 +262,9 @@ fn _deliver_events<F>(w: Worker&) {
         } else if r.kind == _PENDING_WRITABLE {
             let e: Event = Event.Writable { conn: conn, user: user };
             F(w, e);
+        } else if r.kind == _PENDING_EOF {
+            let e: Event = Event.PeerEof { conn: conn, user: user };
+            F(w, e);
         } else {
             let e: Event = Event.Closed { conn: conn, user: user, why: r.why };
             F(w, e);
@@ -321,7 +325,18 @@ fn _read_for_handler(w: Worker&, i: i64) {
         return;
     }
     w._give_back_buffer(b);
-    if n == 0 { s.up.eof = true; w._begin_close(i, CloseReason.PeerClosed); return; }
+    if n == 0 {
+        s.up.eof = true;
+        if s.keep_open && !s.closing {                       // the handler wants to finish its answer (RT-15a)
+            if s.wr_shut { w._close_connection(i, CloseReason.PeerClosed); return; }
+            s.half_closed_at_ms = w._now_ms;                  // the half-close timeout (Limits.half_close_timeout_ms) bounds the wait for the handler (RT-15f)
+            w._queue_event(_PENDING_EOF, i);
+            w._update_epoll_interest(i);
+            return;
+        }
+        w._begin_close(i, CloseReason.PeerClosed);
+        return;
+    }
     if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) { w._update_epoll_interest(i); return; }
     w._close_connection(i, CloseReason.PeerReset);
 }
@@ -358,6 +373,12 @@ fn _flush_output(w: Worker&, i: i64) {
         }
     }
     if s.out_count == 0 && s.closing { w._close_connection(i, s.closing_reason); return; }
+    if s.out_count == 0 && s.shut_wr_pending {
+        c_shutdown_wr(s.client_fd);
+        s.wr_shut = true;
+        s.shut_wr_pending = false;
+        if s.up.eof { w._close_connection(i, CloseReason.PeerClosed); return; }      // both directions are finished
+    }
     if s.want_writable && s._output_bytes() < w.cfg.limits.buffer_size {
         s.want_writable = false;
         let writable .= w._queue_event(_PENDING_WRITABLE, i);
@@ -374,7 +395,36 @@ fn _begin_close(w: Worker&, i: i64, reason: CloseReason) {
     w._flush_output(i);
 }
 
-// STUBS (red gate only, replaced by the implementation in the next commit).
-fn set_keep_open_on_eof(w: Worker&, c: Conn, keep: bool) { }
-fn shutdown_write(w: Worker&, c: Conn) { }
-fn send_room(w: Worker&, c: Conn) -> i64 { -1 }
+// Keeps the connection open when the peer finishes sending (it shuts down its write side). Off by default: then the peer's EOF closes the connection after
+// the queued bytes are flushed (Closed with PeerClosed). On: the engine stops reading, delivers PeerEof once, and you can keep sending (send, Writable) and finish with
+// shutdown_write or close. For protocols whose client says "that is my whole request" by half-closing (RT-15a).
+fn set_keep_open_on_eof(w: Worker&, c: Conn, keep: bool) {
+    let i = w._handler_slot(c);
+    if i >= 0 { w._connection_slots[i].keep_open = keep; }
+}
+
+// Once the queued bytes are out, shuts down the write side: the peer reads EOF after the last byte while you can still receive. When the peer has also
+// finished sending, the connection closes (Closed). send returns false from now on. (`close` is the other ending: it closes once the queue is out.)
+fn shutdown_write(w: Worker&, c: Conn) {
+    let i = w._handler_slot(c);
+    if i < 0 { return; }
+    let s .= w._connection_slots[i];
+    if s.closing || s.wr_shut { return; }
+    s.shut_wr_pending = true;
+    w._flush_output(i);
+}
+
+// How many bytes `send` would accept right now: the free room of the 4-buffer queue (a whole `send` of this size or less succeeds), 0 when it is full, the
+// connection is closing or its write side is shut down, or the handle is stale (RT-15d).
+fn send_room(w: Worker&, c: Conn) -> i64 {
+    let i = w._handler_slot(c);
+    if i < 0 { return 0; }
+    let s .= w._connection_slots[i];
+    if s.closing || s.wr_shut || s.shut_wr_pending { return 0; }
+    let size = w.cfg.limits.buffer_size;
+    let tail_room = if s.out_count > 0 { size - s.out_lengths[s.out_count - 1] } else { 0 };
+    let queue_free = 4 - s.out_count;
+    let available = w._free_buffers.len + (w.cfg.limits.buffers_per_worker - w._stats.buffers_total);
+    let fresh = if queue_free < available { queue_free } else { available };
+    tail_room + fresh * size
+}

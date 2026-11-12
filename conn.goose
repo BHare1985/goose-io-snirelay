@@ -95,6 +95,9 @@ struct _ConnectionSlot {
     data_pending: bool,          // a Data event is queued and holds this connection's read buffer
     want_writable: bool,         // a send was refused: tell the handler when it would fit
     closing: bool,               // flush the queue, then close with closing_reason
+    keep_open: bool,             // set_keep_open_on_eof: the peer's EOF does not close the connection (RT-15)
+    shut_wr_pending: bool,       // shutdown_write was called; the write side is shut down once the queue is out
+    wr_shut: bool,               // the write side is shut down
     closing_reason: CloseReason,
     up: _Direction,                  // client to server
     down: _Direction,                // server to client
@@ -325,7 +328,7 @@ fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool, now: i64) -> _Co
         client_mask: if inspect { c_EPOLLIN } else { 0 }, client_registered: false, server_mask: 0, ready: 0, queued: false, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
         inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tried: 0, pick_slot: 0, connect_ms: 0, policied: false, policy_connected: false, tag: 0, target_gen: 0, override_target: -1,
         out_buffers: [-1; 4], out_lengths: [0; 4], out_count: 0, out_pos: 0, consumed: false, paused: false,
-        data_pending: false, want_writable: false, closing: false, closing_reason: CloseReason.PeerClosed,
+        data_pending: false, want_writable: false, closing: false, keep_open: false, shut_wr_pending: false, wr_shut: false, closing_reason: CloseReason.PeerClosed,
         up: _Direction { .. }, down: _Direction { .. },
     };
 }
