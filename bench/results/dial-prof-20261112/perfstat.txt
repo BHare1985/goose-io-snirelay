@@ -1,0 +1,11 @@
+# started on Thu Nov 12 15:51:45 2026
+
+
+ Performance counter stats for process id '990187':
+
+          8,989.72 msec task-clock                                                            
+             1,007      context-switches                                                      
+                12      cpu-migrations                                                        
+
+      11.007713231 seconds time elapsed
+

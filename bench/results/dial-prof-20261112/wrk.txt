@@ -1,0 +1,13 @@
+Running 9s test @ http://127.0.0.1:19101/via/19100
+  2 threads and 64 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     6.08ms    1.23ms  28.79ms   91.45%
+    Req/Sec     5.31k   446.53     6.24k    71.67%
+  Latency Distribution
+     50%    5.84ms
+     75%    6.33ms
+     90%    6.91ms
+     99%   10.36ms
+  95140 requests in 9.01s, 3.90MB read
+Requests/sec:  10562.80
+Transfer/sec:    443.56KB

@@ -1,0 +1,23 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 16K of event 'cpu/cycles/P'
+# Event count (approx.): 30871289655
+#
+# Overhead  Command      Shared Object      Symbol                                               
+# ........  ...........  .................  .....................................................
+#
+     5.67%  dial_server  [nf_tables]        [k] nft_do_chain
+     2.25%  dial_server  [kernel.kallsyms]  [k] memset_orig
+     1.82%  dial_server  dial_server        [.] answer_g.constprop.0.isra.0
+     1.62%  dial_server  [kernel.kallsyms]  [k] nf_hook_slow
+     1.45%  dial_server  [nf_tables]        [k] expr_call_ops_eval
+     1.26%  dial_server  [kernel.kallsyms]  [k] __tcp_transmit_skb
+     1.24%  dial_server  [kernel.kallsyms]  [k] tcp_v4_rcv
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

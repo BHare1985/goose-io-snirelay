@@ -1,0 +1,20 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 16K of event 'cpu/cycles/P'
+# Event count (approx.): 30871289655
+#
+# Overhead  Shared Object    
+# ........  .................
+#
+    82.42%  [kernel.kallsyms]
+     9.80%  [nf_tables]      
+     4.91%  dial_server      
+     1.01%  libc.so.6        
+     0.76%  [nf_conntrack]   
+     0.59%  [nf_nat]         
+     0.31%  [nf_defrag_ipv4] 
+     0.20%  [nft_ct]         
+     0.01%  [kvm]            
