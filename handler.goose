@@ -278,3 +278,24 @@ fn _begin_close(w: Worker&, i: i64, reason: CloseReason) {
     s.closing_reason = reason;
     w._flush_output(i);
 }
+
+// STUB (red gate only, replaced by the implementation in the next commit): a dial that closes at once as ConnectFailed, so that the gate compiles
+// and every RT-14 row fails on its own assertion.
+fn dial(w: Worker&, addr: const u8[:], tag: u16, connect_ms: i64) -> Conn {
+    var i: i64 = 0;
+    var gen: u32 = 1;
+    if w._free_slots.len > 0 {
+        i = w._free_slots.pop();
+        gen = w._connection_slots[i].gen;
+        w._connection_slots[i] = _fresh_slot(gen, -1, 0, false, w._now_ms);
+    } else {
+        i = w._connection_slots.len;
+        w._connection_slots.push(_fresh_slot(gen, -1, 0, false, w._now_ms));
+    }
+    let s .= w._connection_slots[i];
+    s.state = _STATE_HANDLING;
+    w._stats.open++;
+    let conn = Conn { slot: i as u32, gen: s.gen };
+    w._close_connection(i, CloseReason.ConnectFailed);
+    conn
+}
