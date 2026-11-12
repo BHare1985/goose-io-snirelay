@@ -428,3 +428,6 @@ fn send_room(w: Worker&, c: Conn) -> i64 {
     let fresh = if queue_free < available { queue_free } else { available };
     tail_room + fresh * size
 }
+
+// STUB (red gate only, replaced next commit).
+fn draining(w: Worker&) -> bool { false }

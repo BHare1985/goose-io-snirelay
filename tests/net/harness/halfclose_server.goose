@@ -5,6 +5,7 @@
 // Requests (GET only, one per connection; the connection opts in to keeping itself open after the peer's EOF):
 //   GET /N        N bytes of the pattern (body[i] = i % 251), sent as send() accepts them (false -> wait for Writable), then shutdown_write
 //   GET /room     prints `ROOM fresh=F after1000=A full=0|>0 after_drain=D`, then answers "ok" and closes
+//   GET /draining "1" if this worker is draining, else "0" (the connection stays usable for another request)
 //   GET /hang     opts in, answers nothing and never closes (the half-close timeout must end it)
 //   GET /trickle  opts in, then sends one byte on every Tick until send says false (fencing must end it)
 //   GET /plain/N  like /N but WITHOUT the opt-in (the default: the connection closes after the peer's EOF, queued bytes flushed first)
@@ -72,6 +73,14 @@ fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter
     let line = s.req[..find(s.req, "\r\n")];
     let target = line[4..find(line[4..], " ") + 4];
     if target == "/room" { room_probe(w, s, conn); return; }
+    if target == "/draining" {
+        let text = if w.draining() { "1" } else { "0" };
+        var out: u8[>..] = [];
+        format(out, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n", text);
+        w.send(conn, out);
+        s.req.clear();
+        return;
+    }
     if target == "/hang" { w.set_keep_open_on_eof(conn, true); return; }
     if target == "/trickle" { w.set_keep_open_on_eof(conn, true); s.trickle = true; return; }
     var skip: i64 = 1;
@@ -132,6 +141,9 @@ fn run_command(line: const u8[:]) {
         let tag, ok1 = parse_int(parts[1]);
         let until, ok2 = parse_int(parts[2]);
         if ok1 && ok2 { tcprouter::post(tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
+    } else if parts.len == 2 && parts[0] == "drain" {
+        let ms, ok = parse_int(parts[1]);
+        if ok { tcprouter::post(tcprouter::Message.Drain { deadline_ms: ms }); }
     }
 }
 

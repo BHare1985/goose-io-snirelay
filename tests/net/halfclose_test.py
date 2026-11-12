@@ -6,7 +6,7 @@ import os, signal, socket, subprocess, sys, threading, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "harness"))
 from netlib import *
 
-t = Test("halfclose_test", "RT-15a RT-15b RT-15c RT-15d RT-15e RT-15f RT-15g")
+t = Test("halfclose_test", "RT-15a RT-15b RT-15c RT-15d RT-15e RT-15f RT-15g RT-15h")
 host_lock()
 SERVER = os.environ.get("HALFCLOSE_SERVER", "tests/net/harness/halfclose_server")
 
@@ -132,5 +132,26 @@ def body():
     finally:
         r.stop()
 
+def drain_flag():
+    # RT-15h on its own server (the drain closes its listeners and RT-15e fenced the tag of the first one)
+    r2 = Run()
+    try:
+        c = socket.create_connection(("127.0.0.1", r2.port), timeout=10)
+        def ask():
+            c.sendall(b"GET /draining HTTP/1.1\r\n\r\n"); c.settimeout(5)
+            buf = b""
+            while b"\r\n\r\n" not in buf or len(buf.split(b"\r\n\r\n", 1)[1]) < 1: buf += c.recv(100)
+            return buf.split(b"\r\n\r\n", 1)[1]
+        before_drain = ask()
+        r2.say("drain 5000")
+        time.sleep(0.3)
+        during = ask()
+        t.check(before_drain == b"0" and during == b"1", f"RT-15h draining() is false before the Drain message and true after it, on an open connection that can still ask ({before_drain!r}, {during!r})")
+    finally:
+        r2.stop()
+
+
 t.run(body)
+t.run(drain_flag)
+
 t.finish()
