@@ -2,7 +2,16 @@
 
 **Tags.** `v0` means "the latest compatible release": it does not move across a breaking change (it stays on v0.3.0 because v0.4.0 changed `Event`). Pin an exact tag (`v0.4.0`) to get a breaking release.
 
-## v0.4.1 (unreleased)
+## v0.5.0 (unreleased until the full suite and the loaded runs pass)
+
+Additive, but `Limits` and `Stats` are public structs that gained fields (a positional constructor would break), so a minor version.
+
+* Batching window (RT-16): `Limits.batch_min_events` and `Limits.batch_max_wait_us`, OFF by default (0): nothing changes unless both are set. A pass that finds fewer events than the minimum waits up to the maximum for more, then processes.
+  It never waits past a deadline (the next Tick or sweep, a tag deadline, a dial's connect deadline, a paused listener; not entered while draining); a posted message (control, Policy, Drain, Stats) ends the wait at once; fencing is unaffected.
+  `Stats.batch_waits` and `Stats.batch_wait_us` count the windows. Trade: lower CPU per request for higher latency (up to the window).
+* `w.draining() -> bool` (RT-15h).
+
+## v0.4.1 (superseded by v0.5.0)
 
 * `w.draining() -> bool`: true once a Drain message reached the worker, so a handler can answer new requests on open connections with 503 and close (RT-15h).
 

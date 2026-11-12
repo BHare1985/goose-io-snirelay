@@ -172,8 +172,9 @@ fn _serve_loop<P, F>(w: Worker&, p: P&) {
     var last_sweep: i64 = 0;
     loop {
         let wait_ms: i32 = if w._ready_head < w._ready.len || w._policy_head < w._policy_requests.len { 0 } else { w._wait_limit() };     // work left over: do not sleep
-        let n = c_epoll_wait(w._epoll_fd, events[0], 256, wait_ms);
+        var n = c_epoll_wait(w._epoll_fd, events[0], 256, wait_ms);
         w._now_ms = c_boottime_ms();
+        if n > 0 && wait_ms > 0 { n += w._batch_window(events, n, last_tick, last_sweep); }
         // Messages first, then deadlines, then events: a drain or a fence must not be outrun by traffic in the same pass.
         if n > 0 { for k in n { if (events[k].data & 0xff) == _EVENT_KIND_MESSAGE { w._read_messages(); } } }
         w._enforce_deadlines();

@@ -126,10 +126,10 @@ def body():
                 while not stopper:
                     try: c.sendall(b"y" * 16)
                     except OSError: return
-                    time.sleep(0.005)
+                    time.sleep(0.03)                                  # sparse: every pass finds 1 event, so every pass opens a window
             threading.Thread(target=sender, daemon=True).start()
             time.sleep(0.2)
-            until = boottime_ms() + 400
+            until = boottime_ms() + 403
             r.say(f"deadline 7 {until}")
             closed_at = None
             while True:

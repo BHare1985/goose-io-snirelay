@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -167,6 +168,22 @@ void c_reset(int32_t fd) {
 void c_strerror(gs_rref out, int32_t err) {
     const char *s = strerror(err);
     gs_bld_append(out, s, (int64_t)strlen(s));
+}
+
+/* --- the batching window (RT-16) ---------------------------------------------------------------------- */
+
+/* Waits up to `us` microseconds for `fd` to become readable (a worker's message pipe), and returns the microseconds actually waited (-1 on error).
+   A message arriving ends the wait at once: that is the point of waiting on the pipe and not sleeping. */
+int64_t c_wait_readable_us(int32_t fd, int64_t us) {
+    struct timespec t0, t1, to;
+    struct pollfd p;
+    p.fd = fd; p.events = POLLIN; p.revents = 0;
+    to.tv_sec = us / 1000000; to.tv_nsec = (us % 1000000) * 1000;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    int rc = ppoll(&p, 1, &to, NULL);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    if (rc < 0 && errno != EINTR) return -1;
+    return (int64_t)(t1.tv_sec - t0.tv_sec) * 1000000 + (t1.tv_nsec - t0.tv_nsec) / 1000;
 }
 
 /* --- signals ----------------------------------------------------------------------------------------- */

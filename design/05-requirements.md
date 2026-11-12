@@ -190,9 +190,11 @@ Row numbers RT-13a to f are Brian's proposal (Bryan's README left them for Charl
 
 | id | Behaviour | Release | Test | Status |
 |---|---|---|---|---|
-| RT-16a | Off by default (also with only one of the two set): the worker never waits (`Stats.batch_waits` = 0) | v0.5.0 | `batch_test` | green (vacuous until a window exists) |
-| RT-16b | With both set the worker waits: `batch_waits` and `batch_wait_us` count the windows | v0.5.0 | `batch_test` | red |
-| RT-16c | The wait never passes a deadline (the earliest of max_wait, the next Tick/sweep, a tag deadline, `_dial_due`, the drain deadline): a 200 ms window does not delay a tag deadline by more than 60 ms | v0.5.0 | `batch_test` | red-capable (vacuous until a window exists) |
-| RT-16d | A posted message (control, Policy, Drain, Stats) ends the wait at once: a Stats gather with a 200 ms window is as fast as without | v0.5.0 | `batch_test` | red-capable |
-| RT-16e | Fencing is unaffected: zero bytes after a tag deadline that expires during a window | v0.5.0 | `batch_test` | red-capable |
-| RT-16f | Rows: CPU per request and p50/p95 latency with the window on and off (printed); gate: the p95 grows by at most 20 ms | v0.5.0 | `batch_test` | red-capable |
+| RT-16a | Off by default (also with only one of the two set): the worker never waits (`Stats.batch_waits` = 0) | v0.5.0 | `batch_test` | green |
+| RT-16b | With both set the worker waits: `batch_waits` and `batch_wait_us` count the windows | v0.5.0 | `batch_test` | green |
+| RT-16c | The wait never passes a deadline (the earliest of max_wait, the next Tick/sweep, a tag deadline, `_dial_due`, the drain deadline): a 200 ms window does not delay a tag deadline by more than 60 ms (red with the cap removed: the connection closed 199 ms after the deadline) | v0.5.0 | `batch_test` | green |
+| RT-16d | A posted message (control, Policy, Drain, Stats) ends the wait at once: a Stats gather with a 200 ms window is as fast as without (red with the message pipe not watched: 89 ms against 0.6 ms) | v0.5.0 | `batch_test` | green |
+| RT-16e | Fencing is unaffected: zero bytes after a tag deadline that expires during a window (a guard: deadlines are enforced before events are dispatched, so it also holds without the cap) | v0.5.0 | `batch_test` | green |
+| RT-16f | Rows: CPU per request and p50/p95 latency with the window on and off (printed); gate: the p95 grows by at most 20 ms | v0.5.0 | `batch_test` | green |
+
+Measured (batch_test, 8 connections, one 64-byte ping-pong every ~4 ms each, window min=8 / wait=2000 us, this host, idle): CPU per request 71 to 79 us off, 66 to 69 us on (about 7 to 12% less); p50 latency 0.18 ms off, 4.3 ms on, p95 0.25 to 0.30 ms off, 4.5 ms on. The saving is modest at this light load; Milli's measurement (49% to 27% CPU) was at a much higher request rate.

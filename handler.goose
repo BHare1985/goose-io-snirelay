@@ -432,3 +432,30 @@ fn send_room(w: Worker&, c: Conn) -> i64 {
 // True once a Drain message has reached this worker (posted by `drain` or wait_for_signal_then_drain): the listeners are closed and the worker ends
 // when its connections have, or at the deadline. A handler can use it to answer new requests on open connections with 503 and close (RT-15h).
 fn draining(w: Worker&) -> bool { w._draining }
+
+// The batching window (RT-16). Called when a pass found `n` events: if there are fewer than Limits.batch_min_events, waits up to batch_max_wait_us for more
+// and appends what arrived to `events`; returns how many it appended. Off (both limits 0) it returns at once and costs nothing.
+// Rules: (1) it never waits past a deadline: the wait is cut to the earliest of the next Tick, the next sweep, a tag deadline, a dial's connect deadline,
+// a paused listener's resume; it is not entered while draining; (2) it waits on the worker's MESSAGE PIPE, so a posted message (control, Policy, Drain, Stats)
+// ends it at once, and it is skipped when a message is already among the events; (3) the clock is read again afterwards, so fences and timers see the real time.
+fn _batch_window(w: Worker&, events: c_EpollEvent[256]&, n: i32, last_tick: i64, last_sweep: i64) -> i32 {
+    let min = w.cfg.limits.batch_min_events;
+    var us = w.cfg.limits.batch_max_wait_us;
+    if min <= 0 || us <= 0 || (n as i64) >= min || n >= 256 || w._draining { return 0; }
+    for k in n { if (events[k].data & 0xff) == _EVENT_KIND_MESSAGE { return 0; } }
+    let now = c_boottime_ms();
+    var next: i64 = last_tick + 100;                               // the next Tick
+    if last_sweep + 250 < next { next = last_sweep + 250; }
+    if w._deadline_scan_at != 0 && w._deadline_scan_at < next { next = w._deadline_scan_at; }
+    if w._dialing > 0 && w._dial_due != 0 && w._dial_due < next { next = w._dial_due; }
+    for li in w.cfg.listeners.len { if w._listener_resume_at[li] != 0 && w._listener_resume_at[li] < next { next = w._listener_resume_at[li]; } }
+    let room_us = (next - now) * 1000;
+    if room_us < us { us = room_us; }
+    if us <= 0 { return 0; }
+    let slept = c_wait_readable_us(w._message_fd, us);
+    w._stats.batch_waits++;
+    if slept > 0 { w._stats.batch_wait_us += slept; }
+    let m = c_epoll_wait(w._epoll_fd, events[n], 256 - n, 0);        // everything that arrived meanwhile
+    w._now_ms = c_boottime_ms();
+    if m > 0 { m } else { 0 }
+}

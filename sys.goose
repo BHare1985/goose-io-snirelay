@@ -46,6 +46,7 @@ extern fn c_pipe(fds: i32[2]&) -> i32;
 extern fn c_pipe_write(fd: i32, buf: const u8&, len: i64) -> i64;
 extern fn c_pipe_read(fd: i32, buf: u8&, len: i64) -> i64;
 
+extern fn c_wait_readable_us(fd: i32, us: i64) -> i64;
 extern fn c_signals_open() -> i32;
 extern fn c_signal_wait(fd: i32) -> i32;
 
