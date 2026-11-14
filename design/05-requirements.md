@@ -214,14 +214,14 @@ Measured (batch_test, 8 connections, one 64-byte ping-pong every ~4 ms each, win
 
 | id | Behaviour | Release | Test | Status |
 |---|---|---|---|---|
-| RT-18a | The engine's ready list (connections with bytes left to move) stays short under sustained load: one connection that hits the per-wakeup budget on every pass leaves it at most 64 entries (`Stats.ready_len`) | v0.6.0 | `queues_test` | red |
+| RT-18a | The engine's ready list (connections with bytes left to move) stays short under sustained load: one connection that hits the per-wakeup budget on every pass leaves it at most 64 entries (`Stats.ready_len`) | v0.6.0 | `queues_test` | green |
 | RT-18b | With a saturated buffer pool (2 buffers, 6 streams) the waiting-reads list and the ready list stay at most 64 entries (`Stats.waiting_len`). A guard: it was NOT red before the fix (the load I can generate empties the list often, so it never grew past 64); the compaction is the same code as RT-18a's | v0.6.0 | `queues_test` | green (guard) |
-| RT-19a | Closing a connection that waits for a buffer does not spend the buffers it frees on itself: the reader waiting behind it is woken | v0.6.0 | `handler_edges_test` | red |
-| RT-19b | A `send` refused for lack of pool buffers (empty output queue) is followed by `Writable` when buffers return; a send larger than the 4-buffer queue is refused and promises none | v0.6.0 | `handler_edges_test` | red |
-| RT-19c | Bytes the socket takes while the output queue drains count as activity: a slow but steady reader is not closed as idle | v0.6.0 | `handler_edges_test` | red |
-| RT-19d | `forward` is refused after `shutdown_write` and after the peer's EOF | v0.6.0 | `handler_edges_test` | red |
-| RT-19e | A dial that is still connecting ends by its own connect timeout (ConnectFailed), never by the idle timeout | v0.6.0 | `handler_edges_test` | red |
-| RT-19f | A refused connect with no other address left (the rest cleared by SetAddr) is not counted as a retry | v0.6.0 | `handler_edges_test` | red |
-| RT-20a | Bytes a backend sent before it reset the connection still reach the client (the proxy was frozen so data and RST arrived together); the client side keeps closing at once | v0.6.0 | `server_rst_test` | red |
+| RT-19a | Closing a connection that waits for a buffer does not spend the buffers it frees on itself: the reader waiting behind it is woken | v0.6.0 | `handler_edges_test` | green |
+| RT-19b | A `send` refused for lack of pool buffers (empty output queue) is followed by `Writable` when buffers return; a send larger than the 4-buffer queue is refused and promises none | v0.6.0 | `handler_edges_test` | green |
+| RT-19c | Bytes the socket takes while the output queue drains count as activity: a slow but steady reader is not closed as idle | v0.6.0 | `handler_edges_test` | green |
+| RT-19d | `forward` is refused after `shutdown_write` and after the peer's EOF | v0.6.0 | `handler_edges_test` | green |
+| RT-19e | A dial that is still connecting ends by its own connect timeout (ConnectFailed), never by the idle timeout | v0.6.0 | `handler_edges_test` | green |
+| RT-19f | A refused connect with no other address left (the rest cleared by SetAddr) is not counted as a retry | v0.6.0 | `handler_edges_test` | green |
+| RT-20a | Bytes a backend sent before it reset the connection still reach the client (the proxy was frozen so data and RST arrived together; the 8-byte payload passes before the fix by luck of ordering, the 100 kB one does not); the client side keeps closing at once | v0.6.0 | `server_rst_test` | green |
 | RT-20b | The connection is closed afterwards (no leak) | v0.6.0 | `server_rst_test` | green |
 

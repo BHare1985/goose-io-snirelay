@@ -146,7 +146,7 @@ fn set_user(w: Worker&, c: Conn, user: u32)                // your own id for th
 fn user(w: Worker&, c: Conn) -> u32
 fn pause_reading(w: Worker&, c: Conn, paused: bool)        // your own backpressure
 fn forward(w: Worker&, c: Conn, to: Target) -> bool        // hand the conn to the engine's forwarding;
-                                                           // false (nothing done) once a byte was consumed
+                                                           // false (nothing done) once a byte was consumed, after `shutdown_write`, `close`, or the peer's EOF (RT-19d)
 ```
 
 - **Your per-connection state** lives in your own `slot_pool`. On `Opened`, allocate from it and
@@ -160,6 +160,8 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool        // hand the conn to t
   exactly one `Writable` once there is room). A server that ignores `false` loses data only on that connection, never
   memory (RT-5e). `examples/http_hello.goose` sends a small response in one call and says where to look for larger ones;
   `tests/net/harness/handler_server.goose` (tags 2 and 3) shows the loop.
+- **When `Writable` comes, and when it does not.** After a refused `send` you get one `Writable` once there is room: when the connection's own queue drains below one buffer, or, if its queue is empty
+  and the worker's buffer pool is exhausted, when a buffer returns to the pool (RT-19b). A `send` of more than 4 buffers (`4 x buffer_size`) can never fit: it returns false and no `Writable` follows; send it in pieces.
 - **Handler connections have the idle timeout too.** A connection with no bytes in either direction for
   `limits.idle_timeout_ms` is closed (`Closed` with `IdleTimeout`). A handler server cannot keep a quiet keep-alive connection
   open beyond that, and that is intended: set `idle_timeout_ms` to how long a client may stay silent, or have the client send

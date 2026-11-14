@@ -1,4 +1,24 @@
-# Handoff (Brian, 2026-11-09, at the v0.1.0 candidate)
+# Handoff: start here (updated 2026-11-14, v0.6.0)
+
+**Read this block, then `CLAUDE.md`, then the local `TODO.md`. Everything below the line "History" is the log of how we got here: you do not need it to start.**
+
+* **State.** `main` is v0.6.0 (the tag is created only when the full suite and the loaded runs pass, see the rules in CLAUDE.md). Tags: v0.2.0 (policy hook, signals), v0.3.0 (`dial`), v0.4.0 (half-close, breaking: `Event.PeerEof`), v0.5.0 (batching window),
+  v0.6.0 (`Event.PassEnd` and the review fixes; breaking for exhaustive matches). `v0` stays on v0.3.0 (the last compatible release). We are the only consumers, so while the version is 0.x a release may break the API; consumers pin an exact tag.
+* **Consumers.** tcpproxy (Bryan, `~/dev/tcpproxy`) and skein (`~/dev/skein`, built by its own session; its pin moves to the new tag after the push). Neither has an open request to tcprouter.
+* **Open questions for Charlie (API shape, nothing is blocked on them):** should `forward()` adopt the new target's tag for fencing; should `reset()` cancel a dial that has not opened. Both are in `docs/review-2026-11-14.md`.
+* **Not done.** The public-release clean-up (TODO.md Part 2) is unscheduled; it starts when the user needs the 1-million-users challenge entry built with skein. T25 (dial path profile) is on hold: the profile showed 93% kernel time.
+* **Known flakes (named in every tag message):** `drain_test` RT-8c (observation problem, fixed in the test with `ss`; the SYN-drop on SO_REUSEPORT close is kernel behaviour) and `tls_support_test` (the fence check closed early once, in the safe direction).
+* **Where things are.** Behaviours: `design/05-requirements.md` (one row per behaviour, test and status). API: `design/02-api.md`. Engine: `design/03-engine.md`. What is verified/measured/open: `docs/status.md`.
+  What an outside review claimed and what was true: `docs/review-2026-11-14.md`. The release history: `CHANGELOG.md`.
+* **How to work.** Red gate first, one commit per step naming the rows moved, update `design/05` in the same commit, end with `library lines: Goose N, C M` (compute with `wc -l *.goose | tail -1` and `cat src/*.c | wc -l` BEFORE writing the message).
+  The full suite is `tests/run_tests.sh` (about 17 minutes, run it in the background and do not start another run beside it: the timing tests share the host). Load tests only through `~/dev/docker/tools/run-locked.sh`, from a git worktree of the release commit,
+  with `GOOSE=<main tree>/goose-kb/bin/goose` (the compiler is not in a worktree). A new test needs its harness built in `tests/run_tests.sh` (see `edges_server`) and an exported env var.
+* **Traps that cost time.** Never `pkill -f` a pattern that appears in your own command line; kill by PID. A server that calls `spawn()` blocks SIGTERM: use SIGKILL by PID. `/proc/net/tcp` is huge on this host: use `ss -H -ltn "sport = :PORT"`.
+  Host firewall (nftables) skews loopback benchmarks. SO_REUSEPORT listener close can drop a SYN (1 s retransmit). Linux keeps data that arrived before an RST readable. Goose: `a..b` after `as i64` needs a local; a `slot_pool` item cannot hold a growable array; exhaustive `match` on `Event` needs a `PassEnd` arm or `_ =>`.
+
+# History (older notes, newest last; skip unless you need the why)
+
+## v0.1.0 candidate (2026-11-09)
 
 Everything is committed; nothing is half-built. `tests/run_tests.sh`: **30 test files, 0 failed**. Every v1 requirement row in
 [05-requirements.md](05-requirements.md) is green or done; the only rows not green are the two v2 rows (RT-4f bench harness, RT-4g splice).

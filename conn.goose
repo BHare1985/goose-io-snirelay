@@ -29,7 +29,6 @@ let _STATE_DIALING: u8 = 5;          // w.dial: the outbound connect is in progr
 let _STATE_HANDLING: u8 = 4;         // Action.Handle: the user's code owns the connection through events
 let _STATE_INSPECTING: u8 = 3;       // an inspect: Sni listener: waiting for the ClientHello, which stays queued in the kernel
 let _STATE_CONNECTING: u8 = 1;       // the connect to the server is in progress; the client is not read yet
-let _WAKEUP_BUDGET: i64 = 65536;      // bytes one connection direction may move per epoll wakeup before others get a turn (RT-5f)
 let _STATE_FORWARDING: u8 = 2;
 
 // Readiness flags of a forwarded connection: for each socket, readable, writable, and "the peer ended its sending"
@@ -42,10 +41,13 @@ let _READY_CLIENT_ENDED: u8 = 16;
 let _READY_SERVER_ENDED: u8 = 32;
 let _READY_SERVER_BITS: u8 = 44;      // everything about the server socket (kept apart so a retry can forget it)
 
+let _WAKEUP_BUDGET: i64 = 65536;      // bytes one connection direction may move per epoll wakeup before others get a turn (RT-5f)
+
 let _EVENT_KIND_LISTENER: u64 = 1;
 let _EVENT_KIND_CLIENT: u64 = 2;
 let _EVENT_KIND_SERVER: u64 = 3;
 let _EVENT_KIND_MESSAGE: u64 = 4;
+let _WAITER_WRITER: u64 = 2;          // in the low byte of a _waiting_reads entry: a refused send waits for a buffer (0 and 1 are the down and up reads)
 
 // One direction of a connection.
 struct _Direction {
@@ -119,7 +121,8 @@ fn _fail_start(w: Worker&, what: const u8[:], where: const u8[:], err: i32) -> b
     var msg: u8[>..] = [];
     format(msg, what, " ", where, ": ");
     c_strerror(msg, err);
-    let n = if msg.len < w.error.cap { msg.len } else { w.error.cap };
+    let room = w.error.cap - w.error.len;
+    let n = if msg.len < room { msg.len } else { room };
     w.error.append(msg[..n]);
     qput(_DrainReport { drained: 0 });         // a worker that never serves still owes drain() its report
     false
@@ -145,7 +148,8 @@ fn _probe_listeners(cfg: const Config&) {
             var msg: u8[>..] = [];
             format(msg, "cannot listen on ", text, ": ");
             c_strerror(msg, -fd);
-            let n = if msg.len < _spawn_error.cap { msg.len } else { _spawn_error.cap };
+            let room = _spawn_error.cap - _spawn_error.len;
+            let n = if msg.len < room { msg.len } else { room };
             _spawn_error.append(msg[..n]);
             return;
         }
@@ -193,17 +197,33 @@ fn _wake_waiting_read(w: Worker&) {
         if slot < w._connection_slots.len {
             let s .= w._connection_slots[slot];
             if s.live && s.gen == gen {
-                let dir .= s._direction_of(up);
-                if dir.waiting {
-                    dir.waiting = false;
-                    if s.state == _STATE_HANDLING { w._update_epoll_interest(slot); } else { w._queue_ready(slot); }
-                    break;
+                if (e & 0xff) == _WAITER_WRITER {
+                    // A handler whose send was refused for lack of pool buffers while its queue was empty (nothing else would ever wake it): Writable.
+                    if s.state == _STATE_HANDLING && s.want_writable && s.out_count == 0 && !s.closing {
+                        s.want_writable = false;
+                        w._queue_event(_PENDING_WRITABLE, slot);
+                        break;
+                    }
+                } else {
+                    let dir .= s._direction_of(up);
+                    if dir.waiting {
+                        dir.waiting = false;
+                        if s.state == _STATE_HANDLING { w._update_epoll_interest(slot); } else { w._queue_ready(slot); }
+                        break;
+                    }
                 }
             }
         }
     }
-    if w._waiting_reads_head >= w._waiting_reads.len {
+    // The list is emptied when everything was served; under a load that always leaves a waiter it is compacted instead, or it would grow for as long as
+    // the load lasts (RT-18). The copy is at most as long as the head, so it costs O(1) per entry served.
+    let left = w._waiting_reads.len - w._waiting_reads_head;
+    if left == 0 {
         w._waiting_reads.clear();
+        w._waiting_reads_head = 0;
+    } else if w._waiting_reads_head >= 64 && w._waiting_reads_head >= left {
+        for k in left { w._waiting_reads[k] = w._waiting_reads[w._waiting_reads_head + k]; }
+        w._waiting_reads.pop_n(w._waiting_reads_head);
         w._waiting_reads_head = 0;
     }
 }
@@ -218,9 +238,7 @@ fn _direction_of(s: _ConnectionSlot&, up: bool) -> _Direction& {
 }
 
 
-// Sets each fd's epoll interest to what the slot's state needs: read a source only when its direction has
-// nothing unwritten and is not waiting for a buffer; wait for writability only where bytes are pending.
-// Sets the client's epoll interest: the first non-empty interest adds it, later changes modify it.
+// Sets the client's epoll interest of a handler connection: the first non-empty interest adds it, later changes modify it.
 fn _set_client_interest(w: Worker&, i: i64, mask: u32) {
     let s .= w._connection_slots[i];
     if s.client_registered {
@@ -261,7 +279,9 @@ fn _close_connection(w: Worker&, i: i64, reason: CloseReason) {
     if s.state == _STATE_DIALING { w._dialing--; if w._dialing == 0 { w._dial_due = 0; } }
     if s.state == _STATE_HANDLING || s.state == _STATE_DIALING { w._queue_closed(i, reason); }     // a dial that never opened still gets its Closed (RT-14c)
     if s.policy_connected { w._queue_policy_closed(i, reason); }
-    for k in s.out_count { w._give_back_buffer(s.out_buffers[k]); }
+    var out_ids: i32[4] = [-1; 4];                                 // the output queue's buffers, returned after the slot is dead (RT-19a)
+    let out_n = s.out_count as i64;
+    for k in out_n { out_ids[k] = s.out_buffers[k]; }
     if s.override_target >= 0 { w._override_targets[s.override_target].addrs.clear(); }
     s.live = false;
     s.client_fd = -1;
@@ -274,6 +294,8 @@ fn _close_connection(w: Worker&, i: i64, reason: CloseReason) {
     w._free_slots.push(i as u32);
     w._stats.open--;
     w._stats.closed[_close_reason_index(reason)]++;
+    // Giving a buffer back wakes the oldest waiter; the slot is already dead, so it can never be woken by its own buffers.
+    for k in out_n { w._give_back_buffer(out_ids[k]); }
     if up_buf >= 0 { w._give_back_buffer(up_buf); }
     if down_buf >= 0 { w._give_back_buffer(down_buf); }
 }
@@ -352,9 +374,9 @@ fn _new_connection(w: Worker&, li: i64, fd: i32) {
     let s .= w._connection_slots[i];
     w._stats.open++;
 
-    // While a hello is awaited the client is watched for input at once. Otherwise it joins epoll only when the server
-    // answers (_set_client_interest), so a failed connect can be retried with its bytes untouched; a client that hangs
-    // up in the meantime is noticed then, at the latest when the connect timeout ends.
+    // While a hello is awaited the client is watched for input at once. A forwarded connection joins epoll edge-triggered in _start_connecting, before
+    // the connect, but its flags are only acted on once the server answers (a failed connect can be retried with the client's bytes untouched); a client that
+    // hangs up in the meantime is noticed then. A handler connection gets its interest from _update_epoll_interest.
     if inspect {
         let rc = c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, fd, s.client_mask, _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen));
         if rc < 0 { w._close_connection(i, CloseReason.Error); return; }
@@ -413,6 +435,8 @@ fn _sweep_timeouts(w: Worker&, now: i64) {
         if !s.live { continue; }
         if s.state == _STATE_INSPECTING {
             if now - s.started_ms >= limits.inspect_timeout_ms { w._close_connection(i, CloseReason.InspectTimeout); }
+        } else if s.state == _STATE_DIALING {
+            // its own connect deadline ends it (_expire_dials), never the idle timeout (RT-19e)
         } else if s.state == _STATE_CONNECTING {
             let allowed = if s.connect_ms > 0 { s.connect_ms } else { limits.connect_timeout_ms };
             if s.server_fd >= 0 && now - s.started_ms >= allowed { w._connect_failed(i); }
@@ -452,7 +476,7 @@ fn _route_and_connect(w: Worker&, i: i64, hello: Hello) {
     s.tag = tag;
     if w._policy_on && forward { w._start_deciding(i); return; }   // the policy picks, and its tag is fenced then
     if !w._tag_allows(tag) { w._close_connection(i, CloseReason.Fenced); return; }   // fenced, or past its deadline
-    if handle { w._start_handling(i, tag, hello); return; }
+    if handle { w._start_handling(i, hello); return; }
     if count == 0 { w._close_connection(i, CloseReason.ByHandler); return; }
     w._start_connecting(i, count);
 }
@@ -470,7 +494,7 @@ fn _register_client_edge(w: Worker&, i: i64) {
     let mask = c_EPOLLIN | c_EPOLLOUT | c_EPOLLRDHUP | c_EPOLLET;
     let data = _pack_event_data(_EVENT_KIND_CLIENT, i, s.gen);
     if s.client_registered {
-        c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, mask, data);
+        if c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_MOD, s.client_fd, mask, data) < 0 { w._close_connection(i, CloseReason.Error); return; }
         s.ready |= _READY_CLIENT_IN | _READY_CLIENT_OUT;
     } else {
         if c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, s.client_fd, mask, data) < 0 { w._close_connection(i, CloseReason.Error); return; }
@@ -490,15 +514,14 @@ fn _start_connecting(w: Worker&, i: i64, count: i64) {
     w._register_client_edge(i);
     if !s.live { return; }
     s.state = _STATE_CONNECTING;
-    w._attempt_connect(i);
+    w._attempt_connect(i, false);
 }
 
 // Handler mode: the user's code gets the connection as events. Opened goes first; reading starts once it is queued.
-fn _start_handling(w: Worker&, i: i64, tag: u16, hello: Hello) {
+fn _start_handling(w: Worker&, i: i64, hello: Hello) {
     let s .= w._connection_slots[i];
     w._end_inspection(i);
     s.state = _STATE_HANDLING;
-    s.tag = tag;
     let opened .= w._queue_event(_PENDING_OPENED, i);
     match hello {
         Found f => { opened.sni.append(f.name); },
@@ -517,12 +540,6 @@ fn _target_of(w: Worker&, s: _ConnectionSlot&) -> Target {
     target
 }
 
-// A connect that failed: count it, and count a retry when another address is still to be tried.
-fn _count_connect_failure(w: Worker&, attempts: i64, addresses: i64) {
-    w._stats.connect_failures++;
-    if attempts < addresses { w._stats.retries++; }
-}
-
 // Starts a connect to `addr` and puts the new socket into epoll. false when the socket could not even be started.
 fn _connect_to(w: Worker&, i: i64, addr: Addr) -> bool {
     let s .= w._connection_slots[i];
@@ -533,24 +550,32 @@ fn _connect_to(w: Worker&, i: i64, addr: Addr) -> bool {
     if sfd < 0 { return false; }
     s.server_fd = sfd;
     s.server_mask = c_EPOLLIN | c_EPOLLOUT | c_EPOLLRDHUP | c_EPOLLET;
-    c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, sfd, s.server_mask, _pack_event_data(_EVENT_KIND_SERVER, i, s.gen));
+    if c_epoll_ctl(w._epoll_fd, c_EPOLL_CTL_ADD, sfd, s.server_mask, _pack_event_data(_EVENT_KIND_SERVER, i, s.gen)) < 0 {
+        c_close(sfd);                                      // out of epoll memory: an unwatched connect would only end by its timeout
+        s.server_fd = -1;
+        s.server_mask = 0;
+        return false;
+    }
     true
 }
 
 // Starts a connect to the next address not yet tried, or closes the connection when every address has failed. An
 // address that fails at once is counted and the next is tried in the same call; one that is merely in progress ends
 // the call and _connect_finished decides later.
-fn _attempt_connect(w: Worker&, i: i64) {
+fn _attempt_connect(w: Worker&, i: i64, after_failure: bool) {
     let s .= w._connection_slots[i];
     let target = w._target_of(s);
     let count = target.addrs.len;
+    var failed = after_failure;                                    // a retry is counted when another address is really tried after a failure (RT-19f)
     loop {
         if s.attempts >= count { w._close_connection(i, CloseReason.ConnectFailed); return; }
         let index = (s.first_target + s.attempts) % count;
         s.attempts++;
         if target.addrs[index].text.len == 0 { continue; }          // a slot cleared by SetAddr: never picked, not a failure
+        if failed { w._stats.retries++; }
         if w._connect_to(i, target.addrs[index]) { return; }
-        w._count_connect_failure(s.attempts, count);
+        w._stats.connect_failures++;
+        failed = true;
     }
 }
 
@@ -562,8 +587,8 @@ fn _connect_failed(w: Worker&, i: i64) {
     s.server_mask = 0;
     s.ready = s.ready & (255 - _READY_SERVER_BITS);        // whatever the failed attempt reported is void
     if s.policied { w._policy_connect_failed(i); return; }      // the policy decides what next
-    w._count_connect_failure(s.attempts, w._target_of(s).addrs.len);
-    w._attempt_connect(i);
+    w._stats.connect_failures++;
+    w._attempt_connect(i, true);
 }
 
 fn _connect_finished(w: Worker&, i: i64) {
@@ -605,8 +630,15 @@ fn _run_ready(w: Worker&) {
             if s.state == _STATE_FORWARDING { w._pump(slot); }
         }
     }
-    if w._ready_head >= w._ready.len {
+    // Emptied when nothing is left; otherwise what was queued during this pass moves to the front. Clearing only when the head met the tail let a connection that
+    // re-queues itself every pass (it hit the budget) grow the list by one entry per pass for as long as it ran (RT-18a). The copy is shorter than the head.
+    let left = w._ready.len - w._ready_head;
+    if left == 0 {
         w._ready.clear();
+        w._ready_head = 0;
+    } else if w._ready_head > 0 {
+        for k in left { w._ready[k] = w._ready[w._ready_head + k]; }
+        w._ready.pop_n(w._ready_head);
         w._ready_head = 0;
     }
 }
@@ -776,6 +808,15 @@ fn _dispatch_event(w: Worker&, data: u64, events: u32) {
         if !from_client { w._connect_finished(slot); }                          // success, refusal or error: the socket says which
         return;
     }
-    if (events & c_EPOLLERR) != 0 { w._close_connection(slot, CloseReason.PeerReset); return; }
+    if (events & c_EPOLLERR) != 0 {
+        if from_client { w._close_connection(slot, CloseReason.PeerReset); return; }      // the client is gone: nobody to deliver to
+        // The backend reset the connection. Bytes it sent before the RST are still readable (Linux), and "answer, then reset" is what a server does when it closes
+        // with unread request bytes: deliver them first. The next read says ECONNRESET and closes; so does the next write. A connection that is stuck holding
+        // bytes for a slow client stays open until they are out, then the read fails (RT-20a).
+        s.ready |= in_flag | out_flag;
+        w._pump(slot);
+        if s.live && !s.queued && s.up.len <= s.up.pos && s.down.len <= s.down.pos { w._close_connection(slot, CloseReason.PeerReset); }
+        return;
+    }
     w._pump(slot);
 }

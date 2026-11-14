@@ -9,6 +9,12 @@
 * End-of-pass signal (RT-17, for skein): `w.want_pass_end(true)` makes the engine deliver one `Event.PassEnd {}` after the last handler event (Opened, Data, Writable, PeerEof, Closed) of every pass that delivered at least one,
   so a handler can write what it gathered during the pass in one `send`. None on idle passes, none for a pass that only handled a posted message (control, Policy, Stats), a Tick or a policy hook; one after a batching-window wait
   (an ordinary pass). Sends made in PassEnd take the normal path, deadline check included. Off by default, and then costs nothing.
+* Fixes from a review of conn.goose and handler.goose (docs/review-2026-11-14.md lists every claim and its verdict; RT-18 to RT-20):
+  * The engine's ready list and its waiting-reads list no longer grow for as long as a load lasts (a connection that hit the per-wakeup budget on every pass added one entry per pass). `Stats.ready_len` and `Stats.waiting_len` are new gauges (a positional `Stats` constructor would break).
+  * Closing a connection that waits for a buffer no longer spends the buffers it frees on itself, which left a later waiter asleep while a buffer was free.
+  * `send` refused for lack of pool buffers while the connection's own queue is empty now gets its `Writable` when a buffer returns (it never did). A send of more than 4 buffers is refused without promising a `Writable` (it can never fit).
+  * A backend that answers and then resets (RST) no longer loses the response: the bytes it sent before the RST are delivered first (the client side still closes at once).
+  * A handler connection draining a full queue counts as active (no idle close while bytes move); a dial in progress is ended by its own connect timeout, never by the idle timeout; `forward` is refused after `shutdown_write` and after the peer's EOF; `retries` no longer counts a failure with no address left to try; `epoll_ctl` failures in connect and edge registration fail at once.
 
 ## v0.5.0 (unreleased until the full suite and the loaded runs pass)
 

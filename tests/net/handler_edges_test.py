@@ -100,26 +100,22 @@ def body():
         e.close()
     finally: r.stop()
 
-    # RT-19c: bytes the socket takes while the queue drains count as activity
-    r = Run("--buffers", "64", "--buffer-size", "4096", "--idle-ms", "800")
+    # RT-19c: bytes the socket takes while the queue drains count as activity. (The kernel's send buffer is large and only reports "writable" once a third of
+    # it is free, so slow reading cannot show it: the client drains everything at once instead, at 1.2 s of a 1.5 s idle timeout. The flush that follows
+    # is the only activity after the hold; the connection must then live about 1.5 s beyond it, not close at 1.5 s from the hold.)
+    r = Run("--buffers", "64", "--buffer-size", "4096", "--idle-ms", "1500")
     try:
         x = r.conn("e", rcvbuf=2048)
         time.sleep(0.3)
         x.sendall(b"DO HOLD e 2\n")
-        time.sleep(0.4)
-        total = 0; end = time.time() + 3.0
-        x.settimeout(0.05)
-        while time.time() < end:
-            try:
-                d = x.recv(1024); total += len(d)
-                if not d: break
-            except socket.timeout: pass
-            except OSError: break
-            time.sleep(0.05)
-        t.check(not r.has("CLOSED e"), f"RT-19c a peer that keeps reading slowly (3 s, idle timeout 0.8 s) is not closed as idle ({r.lines[-3:]}, read {total} bytes)")
-        stopped = time.time()
-        got = r.wait_for("CLOSED e", 3)
-        t.check(got and "IdleTimeout" in " ".join(l for l in r.lines if l.startswith("CLOSED e")), f"RT-19c once it stops reading the idle timeout does end it ({[l for l in r.lines if l.startswith('CLOSED')]})")
+        time.sleep(0.2)
+        held = time.time()
+        time.sleep(1.0)                                              # 1.2 s after the hold, before the idle timeout
+        got = drain(x, 0.4)                                          # the whole backlog: the server's flush writes the queue now
+        while time.time() - held < 2.3: time.sleep(0.05)
+        t.check(not r.has("CLOSED e"), f"RT-19c the connection whose queue just drained is not closed as idle 2.3 s after the hold (idle timeout 1.5 s; drained {got} bytes) ({r.lines[-3:]})")
+        gone = r.wait_for("CLOSED e", 3)
+        t.check(gone and "IdleTimeout" in " ".join(l for l in r.lines if l.startswith("CLOSED e")), f"RT-19c once quiet the idle timeout does end it ({[l for l in r.lines if l.startswith('CLOSED')]})")
         x.close()
     finally: r.stop()
 

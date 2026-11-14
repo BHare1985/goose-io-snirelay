@@ -4,8 +4,8 @@ tcprouter is a memory-safe TCP router/forwarder library in Goose (epoll, one wor
 handler mode for your own protocol). Private repo for now. **Your task list is `TODO.md` (untracked, local; read it next).**
 
 ## Orient (5 minutes)
-- `README.md` (what it is), `docs/status.md` (verified / measured / not done), `design/05-requirements.md` (every behaviour is a row
-  `RT-n` with a test and a status), `design/06-tests-and-gates.md` (the gates), `docs/memory.md`, `docs/tls-support.md`.
+- `design/HANDOFF.md` (top block: current state, open questions, traps), `README.md` (what it is), `docs/status.md` (verified / measured / not done), `design/05-requirements.md` (every behaviour is a row
+  `RT-n` with a test and a status), `design/06-tests-and-gates.md` (the gates), `docs/memory.md`, `docs/tls-support.md`, `docs/review-2026-11-14.md` (claims already checked: do not redo them).
 - Goose: load the project skill `goose` (`.claude/skills/`), knowledge base `goose-kb/` (`GOOSE_QUICK_REFERENCE.md` first,
   `GOOSE_LESSONS.md` for verified traps; append new ones). Compiler: `goose-kb/bin/goose`. Never invent an API: grep
   `goose-kb/upstream/goose/stdlib/*.goose`.

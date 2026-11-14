@@ -1,4 +1,6 @@
-# tcprouter v0.1.0: what is verified, what is measured, what is open
+# tcprouter v0.6.0: what is verified, what is measured, what is open
+
+(The text below was written at v0.1.0 and is still true; since then: policy hook and messages, signals and drain, `dial`, half-close/`send_room`, batching window, `Event.PassEnd`, and a review-driven set of fixes. The list of releases is in [CHANGELOG.md](../CHANGELOG.md), the open items in [design/HANDOFF.md](../design/HANDOFF.md), and what an outside review claimed and what was true in [review-2026-11-14.md](review-2026-11-14.md).)
 
 Every behaviour is a numbered row in [design/05-requirements.md](../design/05-requirements.md); each row names the test that proves it
 and its status. `tests/run_tests.sh` runs every test; `tests/coverage.sh` lists rows no test proves yet. Compiler: `goose 751794c`.
@@ -31,8 +33,7 @@ HTTP server against the C backend (wrk, same rows): 99.9% (11 B), 99.2% (new con
   bytes). Termination will use gslib's sans-I/O TLS (the user's decision); [docs/tls-support.md](tls-support.md) is the support check: TLS 1.2 and 1.3
   handshakes, HTTP/1.1 keep-alive, SNI, backpressure, close and fence all work on handler mode; three gaps are listed there. gslib's licence is
   unstated (design/09 O-9 stays open) and it is not vendored. No HTTPS server is shipped.
-* **Policy hook and the Gatekeeper proxy (`tcpproxy`)**: backup tiers, first-up, passive failure skip, the control protocol. After this release
-  ([design/07](../design/07-tcpproxy.md), [docs/gatekeeper-next-step.md](gatekeeper-next-step.md)).
+* **The Gatekeeper proxy (`tcpproxy`)** is a separate program (`~/dev/tcpproxy`) built on the policy hook (RT-13); its design is [design/07](../design/07-tcpproxy.md).
 * splice forwarding (RT-4g, v2) and a `bench/compare.sh` harness (RT-4f, v2; the numbers above come from `bench/run_m6.sh`).
 * Linux only. One small C file (`src/c_sys.c`) is part of the package.
 

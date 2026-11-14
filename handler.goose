@@ -31,7 +31,15 @@ fn send(w: Worker&, c: Conn, bytes: const u8[:]) -> bool {
     let extra = bytes.len - tail_room;
     let new_buffers = if extra > 0 { (extra + size - 1) / size } else { 0 };
     let available = w._free_buffers.len + (w.cfg.limits.buffers_per_worker - w._stats.buffers_total);
-    if s.out_count + new_buffers > 4 || new_buffers > available { s.want_writable = true; return false; }
+    if new_buffers > 4 { return false; }                         // can never fit, however empty the queue gets: no Writable is promised for it (RT-19b)
+    if s.out_count + new_buffers > 4 { s.want_writable = true; return false; }     // the queue drains and _flush_output says Writable
+    if new_buffers > available {
+        // The pool is empty and this connection has nothing queued, so no flush will ever run for it: wait in the list of readers waiting for a
+        // buffer, and _wake_waiting_read says Writable when one comes back. Once per refusal (want_writable is the "already waiting" mark).
+        if !s.want_writable && s.out_count == 0 { w._waiting_reads.push(_pack_event_data(_WAITER_WRITER, i, s.gen)); }
+        s.want_writable = true;
+        return false;
+    }
 
     var offset = 0;
     while offset < bytes.len {
@@ -77,7 +85,6 @@ fn dial(w: Worker&, addr: const u8[:], tag: u16, connect_ms: i64) -> Conn {
     s.connect_ms = connect_ms;
     w._stats.open++;
     w._dialing++;
-    w._note_dial_due(w._now_ms + (if connect_ms > 0 { connect_ms } else { w.cfg.limits.connect_timeout_ms }));
     let conn = Conn { slot: i as u32, gen: s.gen };
     if w._stats.open > w.cfg.limits.max_conns_per_worker { w._close_connection(i, CloseReason.ConnectFailed); return conn; }
     if !w._tag_allows(tag) { w._close_connection(i, CloseReason.Fenced); return conn; }
@@ -92,6 +99,7 @@ fn dial(w: Worker&, addr: const u8[:], tag: u16, connect_ms: i64) -> Conn {
         return conn;
     }
     s.client_registered = true;
+    w._note_dial_due(w._now_ms + (if connect_ms > 0 { connect_ms } else { w.cfg.limits.connect_timeout_ms }));      // only a dial that is really connecting has a deadline to wake for
     conn
 }
 
@@ -183,8 +191,10 @@ fn forward(w: Worker&, c: Conn, to: Target) -> bool {
     if i < 0 { return false; }
     let s .= w._connection_slots[i];
     if s.consumed || s.out_count > 0 || s.data_pending || to.addrs.len == 0 { return false; }
+    // Not a connection that was shut down or closed on, or whose peer already ended: forwarding would never tell the backend about an EOF it was not there for (RT-19d).
+    if s.closing || s.wr_shut || s.shut_wr_pending || s.up.eof { return false; }
     var at = -1;                                         // an unused entry of the side table, else a new one
-    for k in w._override_targets.len { if at < 0 && w._override_targets[k].addrs.len == 0 { at = k; } }
+    for k in w._override_targets.len { if at < 0 && w._override_targets[k].addrs.len == 0 { at = k; break; } }
     if at < 0 { at = w._override_targets.len; w._override_targets.push(to); } else { w._override_targets[at] = to; }
     s.override_target = at as i32;
     s.state = _STATE_CONNECTING;
@@ -359,6 +369,7 @@ fn _flush_output(w: Worker&, i: i64) {
         let n = c_send(s.client_fd, rest[0], rest.len);
         if n > 0 {
             s.out_pos += n as i32;
+            s.last_active_ms = w._now_ms;                 // bytes are moving: not idle, however long the queue takes to drain (RT-19c)
             w._stats.bytes_out += n;
             if s.out_pos == s.out_lengths[0] {            // the oldest buffer is done: back to the pool, the others move up
                 w._give_back_buffer(s.out_buffers[0]);
@@ -366,7 +377,9 @@ fn _flush_output(w: Worker&, i: i64) {
                 s.out_count--;
                 s.out_pos = 0;
             }
-        } else if n == -(c_EAGAIN as i64) || n == -(c_EINTR as i64) {
+        } else if n == -(c_EINTR as i64) {
+            continue;
+        } else if n == -(c_EAGAIN as i64) {
             break;
         } else {
             w._close_connection(i, CloseReason.PeerReset);
@@ -382,7 +395,7 @@ fn _flush_output(w: Worker&, i: i64) {
     }
     if s.want_writable && s._output_bytes() < w.cfg.limits.buffer_size {
         s.want_writable = false;
-        let writable .= w._queue_event(_PENDING_WRITABLE, i);
+        w._queue_event(_PENDING_WRITABLE, i);
     }
     w._update_epoll_interest(i);
 }
