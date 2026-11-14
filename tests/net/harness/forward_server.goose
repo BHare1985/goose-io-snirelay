@@ -73,7 +73,8 @@ fn print_stats(w: tcprouter::Worker&, index: i64) {
            " connect_failures=", s.connect_failures, " retries=", s.retries,
            " buffers_total=", s.buffers_total, " buffers_in_use=", s.buffers_in_use,
            " buffer_waits=", s.buffer_waits, " stale_events=", s.stale_events, " bad_events=", s.bad_events,
-           " accept_failures=", s.accept_failures);
+           " accept_failures=", s.accept_failures,
+           " ready_len=", s.ready_len, " waiting_len=", s.waiting_len);
     format(line, " closed=");
     for k in 11 { if k > 0 { line.push(','); } format(line, s.closed[k]); }
     print(line);

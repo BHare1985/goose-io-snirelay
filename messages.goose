@@ -232,6 +232,7 @@ fn _add_stats(total: Stats&, s: Stats) {
     total.bytes_in += s.bytes_in;  total.bytes_out += s.bytes_out;
     total.connect_failures += s.connect_failures;  total.retries += s.retries;
     total.buffers_total += s.buffers_total;  total.buffers_in_use += s.buffers_in_use;  total.buffer_waits += s.buffer_waits;
+    total.ready_len += s.ready_len;  total.waiting_len += s.waiting_len;
     total.batch_waits += s.batch_waits;  total.batch_wait_us += s.batch_wait_us;
     total.stale_events += s.stale_events;  total.bad_events += s.bad_events;  total.accept_failures += s.accept_failures;
     for t in s.tags {

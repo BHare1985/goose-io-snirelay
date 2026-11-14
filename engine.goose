@@ -59,12 +59,16 @@ struct Stats {
     accept_failures: i64,     // accepts that failed for lack of a resource; the listener rests briefly (RT-1e)
     batch_waits: i64,         // batching windows entered (RT-16): 0 unless Limits.batch_min_events and batch_max_wait_us are both set
     batch_wait_us: i64,       // microseconds slept in them
+    ready_len: i64,           // entries in the engine's list of connections with bytes left to move (a gauge: stays small under any load, RT-18a)
+    waiting_len: i64,         // entries in its list of reads waiting for a pool buffer (a gauge, RT-18b)
     tags: TagSessions[..64],  // connections open now under each tag (sessions per tag)
 }
 
 // A snapshot of this worker's counters. Call it on the worker's thread, e.g. from a Tick.
 fn stats(w: Worker&) -> Stats {
     var s = w._stats;
+    s.ready_len = w._ready.len;
+    s.waiting_len = w._waiting_reads.len;
     s.tags.clear();
     for i in w._connection_slots.len {                       // sessions per tag: counted when asked, not kept up to date
         let slot .= w._connection_slots[i];

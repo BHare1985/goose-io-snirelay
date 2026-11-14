@@ -70,6 +70,9 @@ if [ -e "${net_drivers[0]}" ]; then
         "$GOOSE" build --debug -o "$work/passend_server" tests/net/harness/passend_server.goose >"$work/passend_server.build.log" 2>&1 \
             && export PASSEND_SERVER="$work/passend_server" \
             || { echo "BUILD FAILED  tests/net/harness/passend_server.goose"; sed 's/^/    /' "$work/passend_server.build.log" | head -20; failed=$((failed + 1)); }
+        "$GOOSE" build --debug -o "$work/edges_server" tests/net/harness/edges_server.goose >"$work/edges_server.build.log" 2>&1 \
+            && export EDGES_SERVER="$work/edges_server" \
+            || { echo "BUILD FAILED  tests/net/harness/edges_server.goose"; sed 's/^/    /' "$work/edges_server.build.log" | head -20; failed=$((failed + 1)); }
         # test-only fast echo backend (C, independent of tcprouter): generation_test needs 100,000 accepts/s
         ${CC:-cc} -O1 -o "$work/echo_server" tests/net/harness/echo_server.c && export ECHO_SERVER="$work/echo_server"
         for drv in "${net_drivers[@]}"; do
