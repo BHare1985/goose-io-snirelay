@@ -203,9 +203,9 @@ Measured (batch_test, 8 connections, one 64-byte ping-pong every ~4 ms each, win
 
 | id | Behaviour | Release | Test | Status |
 |---|---|---|---|---|
-| RT-17a | After `w.want_pass_end(true)` the engine delivers `Event.PassEnd {}` exactly once after the last handler event (Opened, Data, Writable, PeerEof, Closed) of every pass that delivered at least one | v0.6.0 | `passend_test` | red |
-| RT-17b | No PassEnd on a pass where nothing happened (idle passes, Ticks) | v0.6.0 | `passend_test` | green (vacuous until implemented) |
-| RT-17c | One PassEnd after a batching-window wait ends, covering the events it gathered | v0.6.0 | `passend_test` | red |
-| RT-17d | Off by default: never a PassEnd, and no per-pass work | v0.6.0 | `passend_test` | green (vacuous until implemented) |
-| RT-17e | A send during PassEnd takes the normal send path, deadline check included: before the deadline it goes out; after the tag deadline passed it sends 0 bytes and returns false | v0.6.0 | `passend_test` | red |
-| RT-17f | A pass that delivered only a posted Message (control, Policy, Stats) and no handler event gets no PassEnd: Messages, Ticks and policy hooks are NOT handler events | v0.6.0 | `passend_test` | green (vacuous until implemented) |
+| RT-17a | After `w.want_pass_end(true)` the engine delivers `Event.PassEnd {}` exactly once after the last handler event (Opened, Data, Writable, PeerEof, Closed) of every pass that delivered at least one | v0.6.0 | `passend_test` | green |
+| RT-17b | No PassEnd on a pass where nothing happened (idle passes, Ticks) | v0.6.0 | `passend_test` | green (red when the guard is removed: shown) |
+| RT-17c | One PassEnd after a batching-window wait ends, covering the events it gathered | v0.6.0 | `passend_test` | green |
+| RT-17d | Off by default: never a PassEnd, and no per-pass work | v0.6.0 | `passend_test` | green (red when the guard is removed: shown) |
+| RT-17e | A send during PassEnd takes the normal send path, deadline check included: before the deadline it goes out; after the tag deadline passed it sends 0 bytes and returns false | v0.6.0 | `passend_test` | green |
+| RT-17f | A pass that delivered only a posted Message (control, Policy, Stats) and no handler event gets no PassEnd: Messages, Ticks and policy hooks are NOT handler events | v0.6.0 | `passend_test` | green (red when the guard is removed: shown) |

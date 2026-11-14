@@ -108,6 +108,8 @@ root struct Worker {
     _draining: bool = false,
     _drain_deadline_ms: i64 = 0,
     _tags: _TagEntry[..64] = [],                 // deadlines per tag (messages.goose)
+    _want_pass_end: bool = false,                // w.want_pass_end(true): deliver Event.PassEnd after the last handler event of a pass (handler.goose)
+    _pass_delivered: i64 = 0,                    // handler events delivered in this pass (counted only while _want_pass_end)
     _dialing: i64 = 0,                           // dialled connections whose connect is still in progress (handler.goose: dial)
     _dial_due: i64 = 0,                          // the earliest connect deadline among them (0 = none known): the loop wakes then, never earlier for this
     _tags_full: bool = false,                    // a deadline could not be recorded (table full): every tag without an entry is fenced (RT-6g)
@@ -190,6 +192,7 @@ fn _serve_loop<P, F>(w: Worker&, p: P&) {
         w._deliver_events(F);
         if w._drain_finished() {
             w._deliver_events(F);
+            w._finish_pass(F);
             qput(_DrainReport { drained: w._stats.closed[_close_reason_index(CloseReason.Drained)] });
             return;
         }
@@ -206,6 +209,7 @@ fn _serve_loop<P, F>(w: Worker&, p: P&) {
             F(w, tick);
             w._deliver_events(F);
         }
+        w._finish_pass(F);
     }
 }
 

@@ -275,3 +275,23 @@ down, `send` returns false afterwards, and the connection closes once the peer h
 name). The half-close timeout runs from `PeerEof`; a tag fence closes the connection as Fenced even while the handler is still sending. `w.send_room(conn) -> i64` is the number of bytes `send`
 would accept now (at most 4 x `buffer_size`; 0 when full, closing, shut down or a stale handle); a send that the socket takes at once does not use room.
 
+## 9. End of a pass: `w.want_pass_end` and `Event.PassEnd` (v0.6.0, RT-17)
+
+A handler that answers many requests in one pass can gather the replies and write them once, if it knows the pass is over. `w.want_pass_end(true)` (per worker; off by default, and then free) makes the engine deliver
+`Event.PassEnd {}` once, after the last handler event of a pass.
+
+* **Which events count:** `Opened`, `Data`, `Writable`, `PeerEof`, `Closed`. A pass that delivered at least one gets exactly one `PassEnd`.
+* **Which do not:** `Tick`, posted Messages (control, Policy, Drain, Stats) and policy hooks (`pick`, `connected`, ...) are NOT handler events. A pass that only handled those, and an idle pass, gets no `PassEnd`.
+* **Batching window:** the pass that ends a wait (RT-16) is an ordinary pass: its events, then one `PassEnd`.
+* **Sending in `PassEnd`:** `send`/`close`/... work as anywhere: the tag deadline is checked at the call (a passed deadline sends 0 bytes and returns false). Events that a send causes (for example a `Closed`) are delivered
+  straight after and do not open a second `PassEnd`.
+* **Breaking:** `Event` has a new variant, so a `match` without `_ =>` needs a `PassEnd` arm.
+
+```goose
+w.want_pass_end(true);
+w.serve() { w, ev => match ev {
+    Data d => { gather(d.user, d.bytes); },     // append the reply to the session's pending bytes
+    PassEnd p => { flush_all(w); },             // one send per session that has something pending
+    _ => { },
+} };
+```

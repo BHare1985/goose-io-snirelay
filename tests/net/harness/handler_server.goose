@@ -199,6 +199,7 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
             Data d => { on_data(w, sessions, d.conn, d.user, d.bytes); },
             Writable x => { on_writable(w, sessions, x.conn, x.user); },
             PeerEof e => { },                          // v0.4.0: only for connections that opt in; this harness never does
+            PassEnd p => { },                          // v0.6.0: only after w.want_pass_end(true); this harness never asks
             Closed c => { on_closed(sessions, c.conn, c.user, c.why); },
             Tick t => { on_tick(t.now_ms, last, every_ms, w, index, sessions); },
         }

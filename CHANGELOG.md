@@ -2,6 +2,14 @@
 
 **Tags.** `v0` means "the latest compatible release": it does not move across a breaking change (it stays on v0.3.0 because v0.4.0 changed `Event`). Pin an exact tag (`v0.4.0`) to get a breaking release.
 
+## v0.6.0 (unreleased until the full suite and the loaded runs pass)
+
+**Breaking for exhaustive matches: `Event` has a new variant, `PassEnd`.** Matches with a `_ =>` arm are unaffected; add `PassEnd p => { }` to the others.
+
+* End-of-pass signal (RT-17, for skein): `w.want_pass_end(true)` makes the engine deliver one `Event.PassEnd {}` after the last handler event (Opened, Data, Writable, PeerEof, Closed) of every pass that delivered at least one,
+  so a handler can write what it gathered during the pass in one `send`. None on idle passes, none for a pass that only handled a posted message (control, Policy, Stats), a Tick or a policy hook; one after a batching-window wait
+  (an ordinary pass). Sends made in PassEnd take the normal path, deadline check included. Off by default, and then costs nothing.
+
 ## v0.5.0 (unreleased until the full suite and the loaded runs pass)
 
 Additive, but `Limits` and `Stats` are public structs that gained fields (a positional constructor would break), so a minor version.

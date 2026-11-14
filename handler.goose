@@ -246,6 +246,7 @@ fn _deliver_events<F>(w: Worker&) {
     while w._pending_head < w._pending.len {
         let r = w._pending[w._pending_head];
         w._pending_head++;
+        if w._want_pass_end { w._pass_delivered++; }
         let conn = Conn { slot: r.slot, gen: r.gen };
         var user = r.user;                               // the current id if it is still the same connection
         if r.slot < w._connection_slots.len {
@@ -460,5 +461,22 @@ fn _batch_window(w: Worker&, events: c_EpollEvent[256]&, n: i32, last_tick: i64,
     if m > 0 { m } else { 0 }
 }
 
-// STUB (red gate only, replaced next commit).
-fn want_pass_end(w: Worker&, on: bool) { }
+// Opt in (or out) of Event.PassEnd (RT-17): after the last handler event of every pass that delivered at least one (Opened, Data, Writable, PeerEof, Closed),
+// the engine delivers one PassEnd, so a handler can flush what it gathered during the pass (one write for many replies). Ticks, posted messages (control,
+// Policy, Stats) and policy hooks are NOT handler events: a pass with only those gets no PassEnd, and neither does an idle pass. A pass that ends a batching
+// window wait is an ordinary pass. Sends made during PassEnd take the normal path (the deadline check included); events they cause are delivered at once and
+// do not open another PassEnd. Off by default, and then costs nothing.
+fn want_pass_end(w: Worker&, on: bool) {
+    w._want_pass_end = on;
+    w._pass_delivered = 0;
+}
+
+// Ends a pass: one PassEnd if the pass delivered handler events and the handler asked for it.
+fn _finish_pass<F>(w: Worker&) {
+    if !w._want_pass_end || w._pass_delivered == 0 { return; }
+    w._pass_delivered = 0;
+    let e: Event = Event.PassEnd { };
+    F(w, e);
+    w._deliver_events(F);
+    w._pass_delivered = 0;
+}
