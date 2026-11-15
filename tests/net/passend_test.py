@@ -47,8 +47,7 @@ def body():
         # (b) from Steve: a pass with only a posted message gets no PassEnd
         m = r.mark(); r.say("ping"); r.say(f"deadline 99 {boottime_ms() + 60000}"); r.settle()
         t.check(kinds(r.since(m)) == ["PONG 1".upper()] or all(x.startswith("PONG") for x in kinds(r.since(m))), f"RT-17f a pass that delivered only a posted message (control) gets no PassEnd ({kinds(r.since(m))})")
-        c.close()
-        m = r.mark(); r.settle()
+        m = r.mark(); c.close(); r.settle()                          # mark BEFORE the close: under load the server can log the Closed before a later mark (found in run 7 of a loaded run)
         k = kinds(r.since(m))
         t.check(k == ["CLOSED", "PASSEND"], f"RT-17a a close: Closed then PassEnd ({k})")
     finally: r.stop()
