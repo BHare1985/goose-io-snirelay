@@ -2,7 +2,7 @@
 
 **Tags.** `v0` means "the latest compatible release": it does not move across a breaking change (it stays on v0.3.0 because v0.4.0 changed `Event`). Pin an exact tag (`v0.4.0`) to get a breaking release.
 
-## v0.6.0 (unreleased until the full suite and the loaded runs pass)
+## v0.6.0 (2026-11-15)
 
 **Breaking for exhaustive matches: `Event` has a new variant, `PassEnd`.** Matches with a `_ =>` arm are unaffected; add `PassEnd p => { }` to the others.
 
@@ -16,7 +16,7 @@
   * A backend that answers and then resets (RST) no longer loses the response: the bytes it sent before the RST are delivered first (the client side still closes at once).
   * A handler connection draining a full queue counts as active (no idle close while bytes move); a dial in progress is ended by its own connect timeout, never by the idle timeout; `forward` is refused after `shutdown_write` and after the peer's EOF; `retries` no longer counts a failure with no address left to try; `epoll_ctl` failures in connect and edge registration fail at once.
 
-## v0.5.0 (unreleased until the full suite and the loaded runs pass)
+## v0.5.0 (2026-11-12)
 
 Additive, but `Limits` and `Stats` are public structs that gained fields (a positional constructor would break), so a minor version.
 
@@ -29,7 +29,7 @@ Additive, but `Limits` and `Stats` are public structs that gained fields (a posi
 
 * `w.draining() -> bool`: true once a Drain message reached the worker, so a handler can answer new requests on open connections with 503 and close (RT-15h).
 
-## v0.4.0 (unreleased until the full suite and the load gate pass)
+## v0.4.0 (2026-11-12)
 
 **Breaking for exhaustive matches: `Event` has a new variant, `PeerEof`.** Matches with a `_ =>` arm are unaffected.
 
