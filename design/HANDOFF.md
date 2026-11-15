@@ -4,14 +4,14 @@
 
 * **State.** `main` is v0.6.0 (the tag is created only when the full suite and the loaded runs pass, see the rules in CLAUDE.md). Tags: v0.2.0 (policy hook, signals), v0.3.0 (`dial`), v0.4.0 (half-close, breaking: `Event.PeerEof`), v0.5.0 (batching window),
   v0.6.0 (`Event.PassEnd` and the review fixes; breaking for exhaustive matches). `v0` stays on v0.3.0 (the last compatible release). We are the only consumers, so while the version is 0.x a release may break the API; consumers pin an exact tag.
-* **Consumers.** tcpproxy (Bryan, `~/dev/tcpproxy`) and skein (`~/dev/skein`, built by its own session; its pin moves to the new tag after the push). Neither has an open request to tcprouter.
+* **Consumers.** tcpproxy (Bryan, `~/dev/cnamecloud/tcpproxy`) and skein (`~/dev/skein`, built by its own session; its pin moves to the new tag after the push). Neither has an open request to tcprouter.
 * **Open questions for Charlie (API shape, nothing is blocked on them):** should `forward()` adopt the new target's tag for fencing; should `reset()` cancel a dial that has not opened. Both are in `docs/review-2026-11-14.md`.
 * **Not done.** The public-release clean-up (TODO.md Part 2) is unscheduled; it starts when the user needs the 1-million-users challenge entry built with skein. T25 (dial path profile) is on hold: the profile showed 93% kernel time.
 * **Known flakes (named in every tag message):** `drain_test` RT-8c (observation problem, fixed in the test with `ss`; the SYN-drop on SO_REUSEPORT close is kernel behaviour) and `tls_support_test` (the fence check closed early once, in the safe direction).
 * **Where things are.** Behaviours: `design/05-requirements.md` (one row per behaviour, test and status). API: `design/02-api.md`. Engine: `design/03-engine.md`. What is verified/measured/open: `docs/status.md`.
   What an outside review claimed and what was true: `docs/review-2026-11-14.md`. The release history: `CHANGELOG.md`.
 * **How to work.** Red gate first, one commit per step naming the rows moved, update `design/05` in the same commit, end with `library lines: Goose N, C M` (compute with `wc -l *.goose | tail -1` and `cat src/*.c | wc -l` BEFORE writing the message).
-  The full suite is `tests/run_tests.sh` (about 17 minutes, run it in the background and do not start another run beside it: the timing tests share the host). Load tests only through `~/dev/docker/tools/run-locked.sh`, from a git worktree of the release commit,
+  The full suite is `tests/run_tests.sh` (about 17 minutes, run it in the background and do not start another run beside it: the timing tests share the host). Load tests only through `~/dev/cnamecloud/testbed/tools/run-locked.sh`, from a git worktree of the release commit,
   with `GOOSE=<main tree>/goose-kb/bin/goose` (the compiler is not in a worktree). A new test needs its harness built in `tests/run_tests.sh` (see `edges_server`) and an exported env var.
 * **Traps that cost time.** Never `pkill -f` a pattern that appears in your own command line; kill by PID. A server that calls `spawn()` blocks SIGTERM: use SIGKILL by PID. `/proc/net/tcp` is huge on this host: use `ss -H -ltn "sport = :PORT"`.
   Host firewall (nftables) skews loopback benchmarks. SO_REUSEPORT listener close can drop a SYN (1 s retransmit). Linux keeps data that arrived before an RST readable. Goose: `a..b` after `as i64` needs a local; a `slot_pool` item cannot hold a growable array; exhaustive `match` on `Event` needs a `PassEnd` arm or `_ =>`.
@@ -55,7 +55,7 @@ library lines: Goose 2126, C 222. What is verified, measured and open is in [doc
 ## Queue after v0.1.0 (updated 2026-11-11; the full list with details is the local `TODO.md`)
 
 State of `main` at 3657c89 (pushed): policy hook (55be46b), CLAUDE.md, ReplaceDeadline + SetAddr + 64-byte Message (3657c89).
-RT-6f is green 26/26 and 100 of 100 runs alone; the 100-run gate **under load is pending** (run it under `~/dev/docker/tools/run-locked.sh`, hogs killed by a trap;
+RT-6f is green 26/26 and 100 of 100 runs alone; the 100-run gate **under load is pending** (run it under `~/dev/cnamecloud/testbed/tools/run-locked.sh`, hogs killed by a trap;
 `/tmp/rd_load.sh` was the script). The full suite has not been rerun since the policy-hook commit. RT-10c is green.
 
 Order (Charlie, priority: tcprouter + tcpproxy ready for Demo 2):
@@ -65,7 +65,7 @@ Order (Charlie, priority: tcprouter + tcpproxy ready for Demo 2):
    `tests/net/policy_message_test.py`, `tests/run_tests.sh`, and `on_message` stub added to `policy_server.goose` (every policy now needs the hook).
    Test state: 10 of 11 checks pass; the one failing check is probably the test's text match on `now_ok=` (Goose prints a bool in its own spelling; look at
    the harness output). Rows RT-13g, h, i are not yet in design/05. SetAddr/ReplaceDeadline/Deadline are still to be handed to the policy read-only (Charlie), not done.
-2. **T01d `Pick.To.connect_ms`** (0 = `Limits.connect_timeout_ms`): Bryan's gate and a 6-line patch are in `~/dev/tcpproxy/gates/connect_ms`; every `Pick.To` constructor needs the
+2. **T01d `Pick.To.connect_ms`** (0 = `Limits.connect_timeout_ms`): Bryan's gate and a 6-line patch are in `~/dev/cnamecloud/tcpproxy/gates/connect_ms`; every `Pick.To` constructor needs the
    field; check that a retry restarts the connect timer.
 3. **T01b signals**: SIGUSR1 in the signalfd set, `wait_for_signal() -> i32`, `drain(deadline_ms) -> i64`; `wait_for_signal_then_drain` stays as a wrapper.
 4. The RT-6f gate under load, then the full suite (`tests/run_tests.sh`, about 15 minutes, in the background).
@@ -83,7 +83,7 @@ signals (RT-8d, RT-8e) in the commit after cec6dac (see `git log`). Full suite l
 No working-tree changes are left uncommitted. TODO.md (local, untracked) holds the long list.
 
 Remaining order before the tag:
-1. The RT-6f 100-run gate under load, UNDER the host lock: build a worktree of the final commit and run `~/dev/docker/tools/run-locked.sh /tmp/rd_load.sh`
+1. The RT-6f 100-run gate under load, UNDER the host lock: build a worktree of the final commit and run `~/dev/cnamecloud/testbed/tools/run-locked.sh /tmp/rd_load.sh`
    (it starts nproc busy loops with a trap that kills them; the script is `/tmp/rd_load.sh`, rewrite it if /tmp was cleaned). Never run load outside the lock.
    RT-6f in design/05 still says "green after the 100-run gate (alone: pending; under load: pending)": alone is 100/100 (fixed test), update it with the result.
 2. The full suite on the final commit (`tests/run_tests.sh`, about 15 minutes, in the background; its 34+ files include the new policy_message, connect_ms, signal and tag_overflow tests).
@@ -100,7 +100,7 @@ once (never)", about 1 run in 25; my untested guess is a recycled port on a busy
 check sees a connection succeed) and `tls_support_test` (the fence check, an early close with 0 late bytes: the safe direction). The host was busy with other teams' runs.
 Every other file passed, including policy_message, connect_ms, signal and tag_overflow.
 NOT done: the RT-6f gate under load (a queued job never started and was removed: its wait loop matched its own wrapper; rebuild it as in the 2026-11-11 note, from a worktree at
-the final commit, under `~/dev/docker/tools/run-locked.sh`), and the tag. Steve's ruling: tag v0.2.0 only AFTER the load gate passes; put RT-8c (`drain_test`) and the
+the final commit, under `~/dev/cnamecloud/testbed/tools/run-locked.sh`), and the tag. Steve's ruling: tag v0.2.0 only AFTER the load gate passes; put RT-8c (`drain_test`) and the
 `tls_support_test` early close in the tag message as known issues with test names; after the tag RT-8c is the next item. design/07 PX-2a now says the passive skip is one check
 interval (1 s by default), per Bryan. Bryan pins a3a5f2c until the tag exists.
 

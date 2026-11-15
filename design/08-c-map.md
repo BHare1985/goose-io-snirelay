@@ -1,6 +1,6 @@
 # 08 — Where the C proxy's parts go
 
-The C proxy: `~/dev/c_proxy/proxy.c` (≈ 2,800 lines), `backend.c`, `gkproxy.h`. Its design rules
+The C proxy: `~/dev/cnamecloud/c_proxy/proxy.c` (≈ 2,800 lines), `backend.c`, `gkproxy.h`. Its design rules
 were chosen so this port is mechanical: one loop per core, share-nothing; flat records by index +
 generation, never pointers; no malloc on the data path; dispatch on a tag in the event data, no
 function pointers; liburing behind a thin C surface (`c_proxy/AGENTS.md`).

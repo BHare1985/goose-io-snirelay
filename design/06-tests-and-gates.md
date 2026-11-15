@@ -50,7 +50,7 @@ tcprouter/
 both modes.
 
 **tcpproxy v1 and the Goose proxy:** Steve's acceptance suite `verify_backends.py` (26 tests in
-`~/dev/c_proxy`) talks to the proxy only over sockets and the control protocol. A thin program on
+`~/dev/cnamecloud/c_proxy`) talks to the proxy only over sockets and the control protocol. A thin program on
 top of tcprouter + tcpproxy that speaks the same CLI flags and control protocol must pass it
 unchanged. Until then, the C proxy remains the one Gatekeeper ships.
 

@@ -12,7 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "tests", "net", "harness"))
 from netlib import free_port, rss_kb
 
-CPROXY = os.path.expanduser("~/dev/c_proxy/proxy")
+CPROXY = os.path.expanduser("~/dev/cnamecloud/c_proxy/proxy")
 GOOSE = os.path.join(HERE, "forward_server")
 BACKEND = os.path.join(HERE, "backend")
 

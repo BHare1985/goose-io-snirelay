@@ -33,7 +33,7 @@ HTTP server against the C backend (wrk, same rows): 99.9% (11 B), 99.2% (new con
   bytes). Termination will use gslib's sans-I/O TLS (the user's decision); [docs/tls-support.md](tls-support.md) is the support check: TLS 1.2 and 1.3
   handshakes, HTTP/1.1 keep-alive, SNI, backpressure, close and fence all work on handler mode; three gaps are listed there. gslib's licence is
   unstated (design/09 O-9 stays open) and it is not vendored. No HTTPS server is shipped.
-* **The Gatekeeper proxy (`tcpproxy`)** is a separate program (`~/dev/tcpproxy`) built on the policy hook (RT-13); its design is [design/07](../design/07-tcpproxy.md).
+* **The Gatekeeper proxy (`tcpproxy`)** is a separate program (`~/dev/cnamecloud/tcpproxy`) built on the policy hook (RT-13); its design is [design/07](../design/07-tcpproxy.md).
 * splice forwarding (RT-4g, v2) and a `bench/compare.sh` harness (RT-4f, v2; the numbers above come from `bench/run_m6.sh`).
 * Linux only. One small C file (`src/c_sys.c`) is part of the package.
 

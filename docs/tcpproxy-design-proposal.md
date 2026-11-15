@@ -4,7 +4,7 @@
 `design/07-tcpproxy.md` or `design/08-c-map.md`. Where it disagrees with them it says so in section 9. Nothing here is built, and nothing starts
 until the user or Charlie says so.
 
-Facts below come from the tcprouter source at v0.1.0, `design/07`, `design/08`, and `~/dev/c_proxy/AGENTS.md`. I have **not** read
+Facts below come from the tcprouter source at v0.1.0, `design/07`, `design/08`, and `~/dev/cnamecloud/c_proxy/AGENTS.md`. I have **not** read
 `verify_backends.py`, so the control-protocol details in section 5 are an outline to be checked against it, not a specification.
 
 ## 1. What tcpproxy is
@@ -118,7 +118,7 @@ complexity, but that is an estimate, not a measurement.
 - Policy rules: unit tests with no sockets (step 2 to 6), fast and deterministic.
 - Engine behaviour with a policy: tcprouter's existing network harness, extended with a policy test double.
 - Fences: the two 100-run gates (alone and under load) from RT-6a-H are repeated with tcpproxy's lease path.
-- Acceptance: `verify_backends.py`, `verify_sni.py`, then `proxybench.sh` through `~/dev/docker/tools/run-locked.sh` against the C proxy. The pick
+- Acceptance: `verify_backends.py`, `verify_sni.py`, then `proxybench.sh` through `~/dev/cnamecloud/testbed/tools/run-locked.sh` against the C proxy. The pick
   adds a few array reads per new connection; forwarding already runs at about 100% of C and new-connection at about 91%, so the budget is the
   25% rule with room to spare. I would measure it rather than assume it.
 

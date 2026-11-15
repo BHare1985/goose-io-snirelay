@@ -6,7 +6,7 @@ import os, re, signal, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "tests", "net", "harness"))
 from netlib import free_port
-CP = os.path.expanduser("~/dev/c_proxy/proxy"); GO = os.path.join(HERE, "forward_server"); BE = os.path.join(HERE, "backend")
+CP = os.path.expanduser("~/dev/cnamecloud/c_proxy/proxy"); GO = os.path.join(HERE, "forward_server"); BE = os.path.join(HERE, "backend")
 
 def run(name, argv, bport, size, tag, close=False):
     port = free_port()

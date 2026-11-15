@@ -5,7 +5,7 @@ description: Write, review and debug Goose (aardappel/goose) code. Use whenever 
 
 # Writing Goose
 
-Knowledge base: `/home/bhare/dev/tcprouter/goose-kb/` (read `GOOSE_QUICK_REFERENCE.md` first; `GOOSE_CODING_RULES.md` for rules;
+Knowledge base: `/home/bhare/dev/cnamecloud/tcprouter/goose-kb/` (read `GOOSE_QUICK_REFERENCE.md` first; `GOOSE_CODING_RULES.md` for rules;
 `GOOSE_LESSONS.md` for verified discoveries — append new ones). Compiler: `goose-kb/bin/goose` (version `dcaf1ef`).
 Upstream docs/source: `goose-kb/upstream/goose/{docs,stdlib,samples}`.
 

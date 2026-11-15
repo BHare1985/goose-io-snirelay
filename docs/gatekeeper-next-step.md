@@ -8,7 +8,7 @@ marked unverified. The agent who writes the actual next-step plan fills section 
 
 ## 1. Where the Gatekeeper facts are (read these, in this order)
 
-All paths are in the Gatekeeper repository, `docs/` (on the dev host `~/dev/gatekeeper/docs`).
+All paths are in the Gatekeeper repository, `docs/` (on the dev host `~/dev/cnamecloud/gatekeeper/docs`).
 
 | Read | For |
 |---|---|
@@ -16,10 +16,10 @@ All paths are in the Gatekeeper repository, `docs/` (on the dev host `~/dev/gate
 | `sprints/sprint-02.md` | what the current sprint demands, acceptance steps, who owns what |
 | `18-requirements.md`, section "Routing and proxy (PRX)" | the proxy rows, with their status; the rows a replacement proxy has to keep green |
 | `21-design-status.md` | what is built, what is decided but not built, and what is open; the table at the top |
-| `23-ui-workflows.md`, `24-panel-design-review.md`, `25-panel-redesign-brief.md`, and `~/dev/gk/docs/openapi.yaml` (in the gk repo, the runtime, not the gatekeeper docs repo; last changed in e988789) | the panel and its API contract (D45, D46, D48) |
+| `23-ui-workflows.md`, `24-panel-design-review.md`, `25-panel-redesign-brief.md`, and `~/dev/cnamecloud/gk/docs/openapi.yaml` (in the gk repo, the runtime, not the gatekeeper docs repo; last changed in e988789) | the panel and its API contract (D45, D46, D48) |
 | `02-architecture.md` | the witness (D47) |
 | `22-health-checks.md` | the check model behind D43 and D44 |
-| `~/dev/c_proxy/AGENTS.md`, `verify_backends.py` (26 tests) | the proxy that ships today and the acceptance suite a replacement must pass unchanged |
+| `~/dev/cnamecloud/c_proxy/AGENTS.md`, `verify_backends.py` (26 tests) | the proxy that ships today and the acceptance suite a replacement must pass unchanged |
 
 ## 2. What tcprouter v0.1.0 provides (tcprouter facts; each links to its evidence)
 
@@ -40,7 +40,7 @@ cannot be closed in user space; the lease margin must cover it. design/06-tests-
 
 ## 3. What a decision about the proxy needs to know that only tcprouter can say
 
-* The engine is a library: a program is `tcprouter` + policy + control protocol. The C proxy is one C program (`~/dev/c_proxy`).
+* The engine is a library: a program is `tcprouter` + policy + control protocol. The C proxy is one C program (`~/dev/cnamecloud/c_proxy`).
   What the program would need is listed in design/08 ("Where the C proxy's parts go").
 * The Goose proxy is not drop-in until `verify_backends.py` passes unchanged against it (design/06, "tcpproxy v1 and the Goose proxy").
 * **HTTPS termination: example only, via gslib** (pinned to a commit, never vendored, licence unstated, O-9); no graceful TLS close yet (G-1, after v0.1.0); ~300 kB per TLS session. See `docs/tls-support.md`. The core does SNI passthrough only.

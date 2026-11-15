@@ -25,12 +25,12 @@ handler mode for your own protocol). Private repo for now. **Your task list is `
 ## Commands
 - All tests: `tests/run_tests.sh` (about 15 minutes; run it in the background). One: `tests/run_tests.sh NAME`. Repeat: `REPEAT=20 ...`.
 - Check/build: `goose-kb/bin/goose check f.goose`; `goose-kb/bin/goose build --debug -o OUT f.goose` (threads and libc need `build`).
-- Benchmarks: `bench/` (see `bench/RESULTS.md`); use `~/dev/docker/tools/run-locked.sh` so runs do not overlap.
+- Benchmarks: `bench/` (see `bench/RESULTS.md`); use `~/dev/cnamecloud/testbed/tools/run-locked.sh` so runs do not overlap.
 - Strace must launch the process itself (attach is not permitted).
 
 ## Who is who (names appear in design/ and messages)
-Charlie: architect, owns `design/` and API shape, approves test edits. Bryan: writes tcpproxy and the red gates in `~/dev/tcpproxy/gates/`.
-Steve: C proxy (`~/dev/c_proxy`). Danya: testbed. Reach Charlie with `mcp__ccd_session_mgmt__send_message` (`session_id` param); the user
+Charlie: architect, owns `design/` and API shape, approves test edits. Bryan: writes tcpproxy and the red gates in `~/dev/cnamecloud/tcpproxy/gates/`.
+Steve: C proxy (`~/dev/cnamecloud/c_proxy`). Danya: testbed. Reach Charlie with `mcp__ccd_session_mgmt__send_message` (`session_id` param); the user
 decides anything about releases, tags and visibility.
 
 ## Goose facts that cost time before

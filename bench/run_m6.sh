@@ -5,7 +5,7 @@
 #   bench/run_m6.sh [QUICK]      run under the host lock; results go to bench/results/<timestamp>/
 #
 # DO NOT RUN while the Gatekeeper testbed (Danya's) or Demo 2 (Charlie/Steve) is up: ask Charlie. The run is wrapped in
-# ~/dev/docker/tools/run-locked.sh, which takes results/host.lock.
+# ~/dev/cnamecloud/testbed/tools/run-locked.sh, which takes results/host.lock.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -28,7 +28,7 @@ export NOROOT=1 SUITE=tcp WORKERS PIN=auto PERF=0 TUNE=0 TRICKS=0 VERIFY=1 SECS=
 export CUSTOM="epoll_copy:--io epoll -m copy -v"
 export CONFIGS="direct epoll_copy epoll_hybrid goose"
 export EXTRA="goose|1|18447|$HERE/forward_server --listen 127.0.0.1:{L} --to 127.0.0.1:{B} --workers $WORKERS --stat-ms 3600000"
-"$HOME/dev/docker/tools/run-locked.sh" "$HERE/proxybench.sh" 2>&1 | tee "$OUT/proxybench.out"
+"$HOME/dev/cnamecloud/testbed/tools/run-locked.sh" "$HERE/proxybench.sh" 2>&1 | tee "$OUT/proxybench.out"
 uptime > "$OUT/uptime-after.txt"; docker ps > "$OUT/docker-ps-after.txt" 2>&1 || true
 # keep the harness's own result folder with the raw data next to ours
 for d in proxybench-*; do [ -d "$d" ] && mv "$d" "$OUT/" ; done

@@ -2,7 +2,7 @@
 # proxybench.sh: benchmark of c_proxy against nginx and HAProxy on one Linux box.
 #
 # Three suites (SUITE=):
-#   edge            THE PRODUCTION PATH, shaped like the Docker testbed (../docker): TLS passthrough
+#   edge            THE PRODUCTION PATH, shaped like the Docker testbed (../testbed): TLS passthrough
 #                   routed by SNI to services with several replicas, a peer region as backup, http
 #                   health checks (GET /health, 1 s, fall 2 / rise 2), connect timeout 500 ms then the
 #                   next server, unknown or missing SNI closed. Every proxy gets that same routing
@@ -214,7 +214,7 @@ if SNI:
     if BACKEND != "builtin":
         print("error: the edge suites bring their own backends; drop BACKEND (or SUITE=tcp)"); sys.exit(1)
     BACKEND = "tls-nginx" if TLS else "builtin-sni"
-    # Shaped like one region of the Docker testbed (../docker, haproxy.cfg): replicas share a port on
+    # Shaped like one region of the Docker testbed (../testbed, haproxy.cfg): replicas share a port on
     # their own addresses (127.0.0.x needs no setup on Linux), health checks go to a side port.
     BPORT, BPORT_B, PEER_A, PEER_B, HCPORT = 18081, 18082, 18085, 18084, 18090
     A_IP, B1_IP, B2_IP, PEER_IP = "127.0.0.2", "127.0.0.3", "127.0.0.4", "127.0.0.5"
@@ -489,7 +489,7 @@ http {{
 }}
 """)
     BACKEND_ARGV = [nginx, "-p", WORK, "-e", WORK + "/backend_tls_error.log", "-c", WORK + "/backend_tls.conf"]
-    NOTES.append(f"edge suite (the production path, as in ../docker): TLS passthrough routed by SNI. a.localhost -> "
+    NOTES.append(f"edge suite (the production path, as in ../testbed): TLS passthrough routed by SNI. a.localhost -> "
                  f"{A_IP}:{BPORT}; b.localhost -> replicas {B1_IP}:{BPORT_B} + {B2_IP}:{BPORT_B} round-robin; each has the "
                  f"peer {PEER_IP} as backup; http health checks (GET /health on :{HCPORT}, 1 s, fall 2 / rise 2; "
                  "nginx OSS has none: passive max_fails only); connect timeout 500 ms, then the next server; unknown "
@@ -507,7 +507,7 @@ def hap_route(tfo):
     # with tfo, HAProxy wants retries for failures it cannot see before the SYN data is gone
     retry = "    retry-on conn-failure empty-response response-timeout\n" if tfo else ""
     if SNI:
-        # as ../docker/haproxy/haproxy.cfg: http checks, a failed connect on live traffic marks the
+        # as ../testbed/haproxy/haproxy.cfg: http checks, a failed connect on live traffic marks the
         # server down (observe layer4), the peer as backup, no default_backend (unknown SNI closed)
         obs = "observe layer4 error-limit 1 on-error mark-down"
         backends = ""
