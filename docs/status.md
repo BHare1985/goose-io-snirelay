@@ -1,6 +1,6 @@
 # tcprouter v0.6.0: what is verified, what is measured, what is open
 
-(The text below was written at v0.1.0 and is still true; since then: policy hook and messages, signals and drain, `dial`, half-close/`send_room`, batching window, `Event.PassEnd`, and a review-driven set of fixes. The list of releases is in [CHANGELOG.md](../CHANGELOG.md), the open items in [design/HANDOFF.md](../design/HANDOFF.md), and what an outside review claimed and what was true in [review-2026-11-14.md](review-2026-11-14.md).)
+(The text below was written at v0.1.0 and is still true; since then: policy hook and messages, signals and drain, `dial`, half-close/`send_room`, batching window, `Event.PassEnd`, and a review-driven set of fixes. The list of releases is in [CHANGELOG.md](../CHANGELOG.md), the open items in [TODO.md](../TODO.md), and what an outside review claimed and what was true in [review-2026-11-14.md](review-2026-11-14.md).)
 
 Every behaviour is a numbered row in [design/05-requirements.md](../design/05-requirements.md); each row names the test that proves it
 and its status. `tests/run_tests.sh` runs every test; `tests/coverage.sh` lists rows no test proves yet. Compiler: `goose 751794c`.
