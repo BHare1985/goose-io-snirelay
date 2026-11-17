@@ -76,6 +76,8 @@ struct _ConnectionSlot {
     last_active_ms: i64,         // when bytes last moved in either direction (idle and half-close timeouts)
     half_closed_at_ms: i64,      // when the first direction ended, or 0
     inspect_seen: i32,           // bytes of the hello seen at the last peek
+    inspected: bool,             // the listener inspects the hello (inspect: Sni): the hello is kept in the client socket until the server's first byte (RT-21)
+    hello_sent: i32,             // bytes peeked from the client and sent to the server, not yet consumed from the client (0: none, or the first byte came)
     rcvlowat_raised: bool,       // SO_RCVLOWAT was raised while waiting for a short hello; put back before forwarding
     route_index: u16,            // the route the connection took (an index into cfg.routes)
     first_target: u8,            // the address the built-in policy starts with
@@ -348,7 +350,7 @@ fn _fresh_slot(gen: u32, fd: i32, listener: u16, inspect: bool, now: i64) -> _Co
     return _ConnectionSlot {
         gen: gen, live: true, state: if inspect { _STATE_INSPECTING } else { _STATE_CONNECTING }, client_fd: fd, server_fd: -1,
         client_mask: if inspect { c_EPOLLIN } else { 0 }, client_registered: false, server_mask: 0, ready: 0, queued: false, listener: listener, user: 0, started_ms: now, last_active_ms: now, half_closed_at_ms: 0,
-        inspect_seen: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tried: 0, pick_slot: 0, connect_ms: 0, policied: false, policy_connected: false, tag: 0, target_gen: 0, override_target: -1,
+        inspect_seen: 0, inspected: inspect, hello_sent: 0, rcvlowat_raised: false, route_index: 0, first_target: 0, attempts: 0, tried: 0, pick_slot: 0, connect_ms: 0, policied: false, policy_connected: false, tag: 0, target_gen: 0, override_target: -1,
         out_buffers: [-1; 4], out_lengths: [0; 4], out_count: 0, out_pos: 0, consumed: false, paused: false,
         data_pending: false, want_writable: false, closing: false, keep_open: false, shut_wr_pending: false, wr_shut: false, closing_reason: CloseReason.PeerClosed,
         up: _Direction { .. }, down: _Direction { .. },
@@ -597,7 +599,56 @@ fn _connect_finished(w: Worker&, i: i64) {
     s.state = _STATE_FORWARDING;
     if s.policied { s.policy_connected = true; w._queue_policy(_POLICY_CONNECTED, i); }
     s.ready |= _READY_SERVER_OUT;                          // a finished connect is writable; its edge was this event
+    if s.inspected { w._send_hello(i); if !s.live || s.state != _STATE_FORWARDING { return; } }
     w._pump(i);
+}
+
+// RT-21: on an inspecting listener the hello is sent from a peek and stays in the client's socket until the server's first byte, so a server that
+// ends before it (closes, resets) can be replaced by the next address and the same bytes sent again. Everything else is as before: the upward pump
+// reads the client only once the first byte came (a TLS client waits for the server's hello, so nothing is lost by waiting).
+fn _send_hello(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    if !w._tag_allows(s.tag) { w._close_connection(i, CloseReason.Fenced); return; }       // nothing is written past a deadline (RT-6a), the peek-send is a write
+    let n = c_peek(s.client_fd, w._inspect_buffer[0], w._inspect_buffer.len);
+    if n <= 0 { return; }                                  // nothing to send yet (or the client is gone): the pump finds out
+    let sent = c_send(s.server_fd, w._inspect_buffer[0], n);
+    if sent == n { s.hello_sent = n as i32; s.last_active_ms = w._now_ms; return; }
+    if sent > 0 { w._consume_client(i, sent); w._stats.bytes_in += sent; return; }   // a partial send (rare): the sent part is consumed, the pump goes on from there, no retry
+    if sent == -(c_EAGAIN as i64) || sent == -(c_EINTR as i64) { return; }          // nothing went: the pump sends it the normal way
+    w._early_end(i);                                       // the server is already gone (reset): the same as an end before its first byte
+}
+
+// Drops `n` bytes the engine already sent from the client's socket (they were peeked).
+fn _consume_client(w: Worker&, i: i64, n: i64) {
+    let s .= w._connection_slots[i];
+    var left = n;
+    while left > 0 {
+        let take = if left < w._inspect_buffer.len { left } else { w._inspect_buffer.len };
+        let got = c_recv(s.client_fd, w._inspect_buffer[0], take);
+        if got <= 0 { break; }
+        left -= got;
+    }
+}
+
+// The server sent its first byte: the hello is the server's now. Drop it from the client and let the upward pump run.
+fn _commit_hello(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    let n = s.hello_sent as i64;
+    s.hello_sent = 0;
+    w._consume_client(i, n);
+    w._stats.bytes_in += n;
+    s.ready |= _READY_CLIENT_IN;
+    w._queue_ready(i);
+}
+
+// The server ended (closed, reset) before its first byte: the same as a failed connect. The policy that was told `connected` is told it closed
+// (its count of the server's connections), then the next address is tried, and the hello goes out again from the client's socket.
+fn _early_end(w: Worker&, i: i64) {
+    let s .= w._connection_slots[i];
+    s.hello_sent = 0;
+    if s.policy_connected { s.policy_connected = false; w._queue_policy_closed(i, CloseReason.ConnectFailed); }
+    s.state = _STATE_CONNECTING;
+    w._connect_failed(i);
 }
 
 // --- moving bytes -------------------------------------------------------------------------------------------------
@@ -664,6 +715,7 @@ fn _pump_direction(w: Worker&, i: i64, up: bool) -> bool {
     let readable = _flag_readable(up);
     let writable = _flag_writable(up);
     var moved: i64 = 0;
+    if up && s.hello_sent > 0 { return false; }                       // the hello is still the client's too (RT-21): not read until the server's first byte
     loop {
         if dir.len > dir.pos {                                        // bytes read but not written yet
             if (s.ready & writable) == 0 { return false; }            // destination full: its writable edge restarts us
@@ -684,6 +736,7 @@ fn _pump_direction(w: Worker&, i: i64, up: bool) -> bool {
         let buf = w._buffer_slice(b);
         let n = c_recv(src, buf[0], buf.len);
         if n > 0 {
+            if !up && s.hello_sent > 0 { w._commit_hello(i); }         // the server's first byte
             dir.len = n as i32;
             dir.pos = 0;
             moved += n;
@@ -698,6 +751,7 @@ fn _pump_direction(w: Worker&, i: i64, up: bool) -> bool {
         dir.len = 0;
         dir.pos = 0;
         w._give_back_buffer(held);
+        if !up && s.hello_sent > 0 && n != -(c_EAGAIN as i64) && n != -(c_EINTR as i64) { w._early_end(i); return false; }   // RT-21: the server ended with no byte
         if n == 0 {                                                   // the source ended: tell the destination, stop reading
             dir.eof = true;
             if s.half_closed_at_ms == 0 { s.half_closed_at_ms = w._now_ms; }
@@ -815,7 +869,7 @@ fn _dispatch_event(w: Worker&, data: u64, events: u32) {
         // bytes for a slow client stays open until they are out, then the read fails (RT-20a).
         s.ready |= in_flag | out_flag;
         w._pump(slot);
-        if s.live && !s.queued && s.up.len <= s.up.pos && s.down.len <= s.down.pos { w._close_connection(slot, CloseReason.PeerReset); }
+        if s.live && s.state == _STATE_FORWARDING && !s.queued && s.up.len <= s.up.pos && s.down.len <= s.down.pos { w._close_connection(slot, CloseReason.PeerReset); }
         return;
     }
     w._pump(slot);

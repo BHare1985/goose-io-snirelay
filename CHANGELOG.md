@@ -2,6 +2,12 @@
 
 **Tags.** `v0` means "the latest compatible release": it does not move across a breaking change (it stays on v0.3.0 because v0.4.0 changed `Event`). Pin an exact tag (`v0.4.0`) to get a breaking release.
 
+## Unreleased
+
+* A server that ends before its first byte is retried (RT-21, docs/early-close-retry.md). On an `inspect: Sni` listener the client's hello is sent from a peek and stays in the client's socket until the server's first byte; if the server
+  closes or resets first, the session goes to the next address (the policy's `connect_failed`, or the built-in rotation) and the same hello is sent again. Not after a first byte, not on other listeners. No API change; the policy's `closed` hook runs
+  for the server that ended, so connection counts stay right. A server that stays silent is not retried (health checks cover it).
+
 ## v0.6.0 (2026-11-15)
 
 **Breaking for exhaustive matches: `Event` has a new variant, `PassEnd`.** Matches with a `_ =>` arm are unaffected; add `PassEnd p => { }` to the others.

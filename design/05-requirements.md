@@ -230,7 +230,7 @@ Measured (batch_test, 8 connections, one 64-byte ping-pong every ~4 ms each, win
 
 | id | Behaviour | Release | Test | Status |
 |---|---|---|---|---|
-| RT-21a | On an `inspect: Sni` listener, a server that closes or resets before sending a byte gets its session moved to the next address with the client's whole hello from byte 0; the client sees only the second server | next | `early_close_test` | red |
-| RT-21b | After the server's first byte nothing is retried: the client sees that byte and the close | next | `early_close_test` | green (guards) |
-| RT-21c | A listener without `inspect: Sni` never replays the client's bytes: the session closes | next | `early_close_test` | green (guards) |
-| RT-21d | The retry is counted in `retries`; the policy's `connect_failed` hook is asked, and its `closed` hook runs first when it had been told `connected` | next | `early_close_test` | red |
+| RT-21a | On an `inspect: Sni` listener, a server that closes or resets before sending a byte gets its session moved to the next address with the client's whole hello from byte 0; the client sees only the second server | next | `early_close_test` | green |
+| RT-21b | After the server's first byte nothing is retried: the client sees that byte and the close | next | `early_close_test` | green |
+| RT-21c | A listener without `inspect: Sni` never replays the client's bytes: the session closes | next | `early_close_test` | green |
+| RT-21d | The retry is counted in `retries`; the policy's `connect_failed` hook is asked, and its `closed` hook runs first when it had been told `connected` | next | `early_close_test` | green |
