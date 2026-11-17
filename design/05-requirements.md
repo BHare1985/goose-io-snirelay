@@ -225,3 +225,12 @@ Measured (batch_test, 8 connections, one 64-byte ping-pong every ~4 ms each, win
 | RT-20a | Bytes a backend sent before it reset the connection still reach the client (the proxy was frozen so data and RST arrived together; the 8-byte payload passes before the fix by luck of ordering, the 100 kB one does not); the client side keeps closing at once | v0.6.0 | `server_rst_test` | green |
 | RT-20b | The connection is closed afterwards (no leak) | v0.6.0 | `server_rst_test` | green |
 
+
+## RT-21 A server that ends before its first byte is retried (docs/early-close-retry.md, gate `gates/early_close_peek`)
+
+| id | Behaviour | Release | Test | Status |
+|---|---|---|---|---|
+| RT-21a | On an `inspect: Sni` listener, a server that closes or resets before sending a byte gets its session moved to the next address with the client's whole hello from byte 0; the client sees only the second server | next | `early_close_test` | red |
+| RT-21b | After the server's first byte nothing is retried: the client sees that byte and the close | next | `early_close_test` | green (guards) |
+| RT-21c | A listener without `inspect: Sni` never replays the client's bytes: the session closes | next | `early_close_test` | green (guards) |
+| RT-21d | The retry is counted in `retries`; the policy's `connect_failed` hook is asked, and its `closed` hook runs first when it had been told `connected` | next | `early_close_test` | red |
