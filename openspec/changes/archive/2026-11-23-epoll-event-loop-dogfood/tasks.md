@@ -1,10 +1,10 @@
 # Tasks
 
-Work happens in `.implementations/goose-io-snirelay` on a new branch; commits follow that repo's CLAUDE.md. Gap records go to the end of this file.
+Work happens in `.implementations/goose-io-tcpproxy` on a new branch; commits follow that repo's CLAUDE.md. Gap records go to the end of this file.
 
 ## 1. Setup and the first checks
 
-- [x] 1.1 Branch goose-io-snirelay from HEAD 8cd67fe, record the baseline (46 test files, 0 failed, the bench numbers of `bench/RESULTS.md` re-measured on this host, bytes per idle connection) in `docs/port-baseline.md`; verify by running `tests/run_tests.sh` once in the background and `bench/run_m6.sh` through `run-locked.sh`
+- [x] 1.1 Branch goose-io-tcpproxy from HEAD 8cd67fe, record the baseline (46 test files, 0 failed, the bench numbers of `bench/RESULTS.md` re-measured on this host, bytes per idle connection) in `docs/port-baseline.md`; verify by running `tests/run_tests.sh` once in the background and `bench/run_m6.sh` through `run-locked.sh`
 - [x] 1.2 Check the retry question against the contract: write a conformance-style probe on goose-io-epoll-ext showing whether peeked ClientHello bytes can be sent to server A, A ends without a byte, and the same bytes are sent to server B before the client's bytes are consumed (RT-21, `gates/early_close_peek`); verify by the probe passing or a gap record
 - [x] 1.3 Make the library generic over `Io`: `Worker` wraps a loop of a type given at compile time, with the required groups listed once and checked at start (`require_*`); verify by a unit test that starting on a loop without a required group fails before any listener opens and names the group
 - [x] 1.4 Import goose-io-epoll-ext and goose-io as local paths for the work; verify by `goose check tcprouter.goose` and a build of `tests/net/harness/forward_server.goose` on the new Worker
@@ -40,7 +40,7 @@ Work happens in `.implementations/goose-io-snirelay` on a new branch; commits fo
 - [x] 6.2 Full suite once on a quiet host, in the background: 46 files, 0 failed, none edited; every test that failed once is rerun with `REPEAT=20` and explained
 - [x] 6.3 Speed and memory gates against the baseline (spec: no loss of speed); verify by a results file naming each workload's ratio; a miss is reported with its cause
 - [x] 6.4 Pin the imports by full commit hash and prove a fresh clone builds and passes `tests/run_tests.sh` (needs the user to push goose-io-epoll and goose-io-epoll-ext; ask first)
-- [x] 6.5 goose-io documentation names goose-io-snirelay as the worked example of the contract and links it; verify by `openspec validate` on both changes and the docs checks
+- [x] 6.5 goose-io documentation names goose-io-tcpproxy as the worked example of the contract and links it; verify by `openspec validate` on both changes and the docs checks
 - [x] 6.6 Report: what passed, what failed, what was not run, every gap found and its change, and any row without a test
 
 ## Gap records
@@ -82,7 +82,7 @@ Work happens in `.implementations/goose-io-snirelay` on a new branch; commits fo
 - Open: 6.4 (pins done by commit hash; fresh-clone proof needs the user's push of tcprouter), 6.5, 6.6.
 
 ## Final report (2026-11-23)
-- Passed: fresh clone of goose-io-snirelay `dogfood-goose-io` at a0c31c5 (imports pinned by commit hash): 43 test files, 0 failed. 43 = the 46 baseline files minus clock_test and package_smoke_test (moved to goose-io-epoll-ext with the old engine) and generation_test run in ext as well. Library is 1722 Goose lines, 0 C.
+- Passed: fresh clone of goose-io-tcpproxy `dogfood-goose-io` at a0c31c5 (imports pinned by commit hash): 43 test files, 0 failed. 43 = the 46 baseline files minus clock_test and package_smoke_test (moved to goose-io-epoll-ext with the old engine) and generation_test run in ext as well. Library is 1722 Goose lines, 0 C.
 - Edited tests: harness setup only (D8); one assertion, RT-5b memory per idle connection, relaxed 512 -> 1024 B by the user's decision (D9; port measures ~700 B, old engine ~170 B).
 - Speed: 97.3-101.4% of the old engine on the proxybench tcp suite; new connection per request 88% (below the 95% bar; cause: extra epoll_ctl and shutdown calls, fix would rework epoll registration; undecided).
 - Flaky: chaos_test RT-1e fails ~1 in 10 runs on both old and new code; not explained.

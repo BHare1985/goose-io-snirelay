@@ -4,7 +4,7 @@
 
 See proposal.md for why. State today:
 
-- goose-io-snirelay (HEAD 8cd67fe) has its own engine: `engine.goose` (Worker, `start`, `serve`, `spawn`, Message), `conn.goose` (connection slots,
+- goose-io-tcpproxy (HEAD 8cd67fe) has its own engine: `engine.goose` (Worker, `start`, `serve`, `spawn`, Message), `conn.goose` (connection slots,
   accept, inspect, route, connect, retry, forward pump, timeout sweep), `handler.goose` (handler mode: send, dial, close, events, flush), a C sidecar
   `src/c_sys.c`, and the layers above it (`address`, `route`, `sni`, `policy`, `messages`, `config`, `check`) that do not touch a socket.
 - The contract (goose-io 0.3) offers `listen`, `dial`, `send`, `close`, `tick_by`, `serve` (core) and half-close, sizing, abort, inspection,
@@ -27,9 +27,9 @@ See proposal.md for why. State today:
 
 ## Decisions
 
-### D1. The router is generic over `Io`, in the root files of goose-io-snirelay
+### D1. The router is generic over `Io`, in the root files of goose-io-tcpproxy
 `Worker` keeps its public methods and wraps a loop value of a type given at compile time. Routing, SNI parsing, policy and messages stay as they are.
-Alternative: copy goose-io-epoll-ext into goose-io-snirelay. Rejected: it would leave the router welded to one loop and teach nothing about the contract.
+Alternative: copy goose-io-epoll-ext into goose-io-tcpproxy. Rejected: it would leave the router welded to one loop and teach nothing about the contract.
 
 ### D2. How tcprouter's features map onto the groups (to be confirmed task by task; a mismatch is a gap)
 
@@ -66,7 +66,7 @@ seen before starting, to be confirmed or dropped by the port and not assumed:
 3. Handler mode (send, dial, events, batching, pause, user value, generation checks).
 4. Tags, deadlines, fences, messages, policy, stats.
 5. Speed and memory gates, `examples/`, docs.
-Each stage is one or more commits in goose-io-snirelay, named after the RT rows moved, as its CLAUDE.md requires. A stage's tests run first on the memory loop
+Each stage is one or more commits in goose-io-tcpproxy, named after the RT rows moved, as its CLAUDE.md requires. A stage's tests run first on the memory loop
 where the test is a unit test, and on goose-io-epoll-ext for the network tests.
 
 ### D5. Acceptance numbers
@@ -79,7 +79,7 @@ where the test is a unit test, and on goose-io-epoll-ext for the network tests.
   in the router.
 
 ### D6. Dependencies are pinned git imports
-goose-io-snirelay imports goose-io and goose-io-epoll-ext by the full commit hash (goose's rule for git imports; tags work too). The two repos are private
+goose-io-tcpproxy imports goose-io and goose-io-epoll-ext by the full commit hash (goose's rule for git imports; tags work too). The two repos are private
 and unpushed today, so the imports start as local paths during the work and become pinned imports once they are pushed. Pushing is asked of the user.
 
 ### D7. The library owns no loop; the application creates the loop and the router side by side
@@ -125,7 +125,7 @@ address, peek and relay counters and compact timestamps in the loop, at the pric
 
 ## Migration Plan
 
-Work in a branch of goose-io-snirelay. The old engine remains available until the last stage (the stage-1 revert 8cd67fe shows an earlier attempt that was
+Work in a branch of goose-io-tcpproxy. The old engine remains available until the last stage (the stage-1 revert 8cd67fe shows an earlier attempt that was
 dropped, so start from HEAD). Rollback is to not merge the branch. The repo is private; nothing is published.
 
 ## Open Questions

@@ -7,7 +7,7 @@ offers the groups it requires.
 ## Requirements
 
 ### Requirement: Same behaviour as tcprouter
-goose-io-snirelay SHALL pass every test file of goose-io-snirelay at its current HEAD (46 files, 0 failed) without any of them being edited, on goose-io-epoll-ext.
+goose-io-tcpproxy SHALL pass every test file of goose-io-tcpproxy at its current HEAD (46 files, 0 failed) without any of them being edited, on goose-io-epoll-ext.
 
 #### Scenario: The suite runs unchanged
 - **WHEN** `tests/run_tests.sh` runs on the ported tree
@@ -26,7 +26,7 @@ The ported library SHALL keep the API shape of tcprouter (Worker, `start`, `serv
 - **THEN** it builds without a source change and its example test passes
 
 ### Requirement: No loss of speed
-The ported router on goose-io-epoll-ext SHALL be no slower than the current goose-io-snirelay on the workloads of `bench/RESULTS.md` (11 B at 64 and 512
+The ported router on goose-io-epoll-ext SHALL be no slower than the current goose-io-tcpproxy on the workloads of `bench/RESULTS.md` (11 B at 64 and 512
 connections, a new connection per request, 16 KiB, 64 KiB, 1 MiB, web mix), measured on the same host back to back, and SHALL use no more memory per idle
 connection than 1.25 times the current figure.
 
@@ -51,7 +51,7 @@ state at start which groups it requires and fail at once if the loop lacks one.
 - **THEN** there are none
 
 ### Requirement: Self-contained repository
-goose-io-snirelay SHALL build and test from a fresh clone with no path into the goose-io repository; goose-io-epoll-ext and goose-io are pinned by git import.
+goose-io-tcpproxy SHALL build and test from a fresh clone with no path into the goose-io repository; goose-io-epoll-ext and goose-io are pinned by git import.
 
 #### Scenario: Fresh clone
 - **WHEN** the repository is cloned to an empty directory and `tests/run_tests.sh` runs
