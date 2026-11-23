@@ -54,7 +54,7 @@ Columns: id · behaviour · priority · test · status.
 | id | Behaviour | Pri | Test | Status |
 |---|---|---|---|---|
 | RT-5a | An idle forwarded connection holds no pool buffer | v1 | `memory_test` | green |
-| RT-5b | Memory per idle connection ≤ 512 bytes of worker memory beyond kernel socket buffers (RSS growth over 10,000 idle) | v1 | `memory_test` | green |
+| RT-5b | Memory per idle connection ≤ 1024 bytes (was 512 on the router's own engine; a connection is now two general loop links, decision of the owner, see goose-io epoll-event-loop-dogfood design D9) of worker memory beyond kernel socket buffers (RSS growth over 10,000 idle) | v1 | `memory_test` | green |
 | RT-5c | A destination that stops reading stops the engine reading from the source; RSS grows ≤ 64 MB while 1 GB is offered (measured growth printed each run) | v1 | `backpressure_test` | done |
 | RT-5d | With the pool exhausted, the worker keeps serving other connections as buffers return; no abort, waits counted | v1 | `backpressure_test` | done |
 | RT-5e | Handler `send` returns false at the per-connection cap and `Writable` follows once drained; memory stays bounded | v1 | `handler_test` | green |

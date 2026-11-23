@@ -12,6 +12,8 @@
 //   GET /sni    the server name the client sent
 //   GET /live   how many sessions this worker holds
 
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
 import tcprouter from "../../..";
 import gslib from "github.com/SorinS/gslib@714f87b387f2f9de6a4c7a77d9abc9db2516ee80";
 import gslib.crypto.tls;
@@ -46,11 +48,11 @@ fn die(message: const u8[:]) {
 }
 
 // Moves what is pending into the engine, a piece at a time. Returns false when the engine said no (Writable continues).
-fn flush(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn) -> bool {
+fn flush(w: tcprouter::Worker&, io: epoll_ext::Loop&, s: Session&, conn: tcprouter::Conn) -> bool {
     while s.sent < s.pend.len {
         let rest = s.pend.len - s.sent;
         let n = if rest < PIECE { rest } else { PIECE };
-        if !w.send(conn, s.pend[s.sent..s.sent + n]) { return false; }
+        if !w.send(io, conn, s.pend[s.sent..s.sent + n]) { return false; }
         s.sent += n;
     }
     s.pend.clear();
@@ -66,10 +68,10 @@ fn queue(s: Session&, out: const u8[:]) -> bool {
 }
 
 // Encrypts the next window of the body once the previous records are out, then flushes again, until the body is done.
-fn pump(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn) {
+fn pump(w: tcprouter::Worker&, io: epoll_ext::Loop&, s: Session&, conn: tcprouter::Conn) {
     loop {
-        if !flush(w, s, conn) { w.pause_reading(conn, true); return; }
-        w.pause_reading(conn, false);
+        if !flush(w, io, s, conn) { w.pause_reading(io, conn, true); return; }
+        w.pause_reading(io, conn, false);
         if s.left > 0 {
             var window: u8[WINDOW] = [0; WINDOW];
             var out: u8[>..] = [];
@@ -83,7 +85,7 @@ fn pump(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn) {
             break;
         }
     }
-    if s.closing { w.close(conn); }
+    if s.closing { w.close(io, conn); }
 }
 
 fn respond(s: Session&, out: u8[>..]&, status: const u8[:], length: i64, body: const u8[:]) {
@@ -127,7 +129,7 @@ fn live_count(sessions: slot_pool<Session>&) -> i64 {
     n
 }
 
-fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32, bytes: const u8[:]) {
+fn on_data(w: tcprouter::Worker&, io: epoll_ext::Loop&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32, bytes: const u8[:]) {
     if user >= sessions.items.len { return; }
     let s .= sessions.items[user];
     if !s.live || s.closing { return; }
@@ -144,28 +146,39 @@ fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter
     }
     if s.req.len > 0 && !s.closing { answer(s, out, live_count(sessions)); }
     queue(s, out);
-    pump(w, s, conn);
+    pump(w, io, s, conn);
 }
 
-fn on_writable(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32) {
+fn on_writable(w: tcprouter::Worker&, io: epoll_ext::Loop&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32) {
     if user >= sessions.items.len { return; }
     let s .= sessions.items[user];
-    if s.live { pump(w, s, conn); }
+    if s.live { pump(w, io, s, conn); }
 }
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var sessions = slot_pool<Session> {};
+    var io = epoll_ext::Loop { .. };
+    io.limits.peek_bound = 32768;
+    io.limits.buffer_size = cfg.limits.buffer_size;
+    io.limits.buffers_per_loop = cfg.limits.buffers_per_worker;
+    io.limits.batch_min_events = cfg.limits.batch_min_events;
+    io.limits.batch_max_wait_us = cfg.limits.batch_max_wait_us;
+    io.limits.max_links = cfg.limits.max_conns_per_worker;
+    io.limits.connect_timeout_ms = cfg.limits.connect_timeout_ms;
+    io.limits.idle_timeout_ms = cfg.limits.idle_timeout_ms;
+    io.limits.half_close_timeout_ms = cfg.limits.half_close_timeout_ms;
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) { print(w.error); return; }
-    w.serve() { w, ev =>
+    if !w.start(io, cfg, index) { print(w.error); return; }
+    io.attach(index);
+    io.serve() { io, ev => w.on_event(io, ev) { w, io, ev =>
         match ev {
             Opened o => {
                 let i = sessions.alloc_index(Session { live: true, conn: tls::server(CONFIG), pend: [], sent: 0, req: [], left: 0, at: 0, closing: false });
-                w.set_user(o.conn, i as u32);
+                w.set_user(io, o.conn, i as u32);
                 log("E opened");
             },
-            Data d => { on_data(w, sessions, d.conn, d.user, d.bytes); },
-            Writable x => { on_writable(w, sessions, x.conn, x.user); },
+            Data d => { on_data(w, io, sessions, d.conn, d.user, d.bytes); },
+            Writable x => { on_writable(w, io, sessions, x.conn, x.user); },
             Closed c => {
                 log(str("E closed why=", c.why));
                 if c.user < sessions.items.len {
@@ -175,23 +188,24 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
             },
             _ => {},
         }
-    };
+    }; };
 }
 
 // --- the control thread: `deadline TAG BOOTTIME_MS` on stdin ------------------------------------------------------
 
 extern fn read(fd: i32, buf: u8&, n: u64) -> i64;
 
-fn run_command(line: const u8[:]) {
+fn run_command(io: epoll_ext::Loop&, line: const u8[:]) {
     let parts = words(line);
     if parts.len == 3 && parts[0] == "deadline" {
         let tag, ok1 = parse_int(parts[1]);
         let until, ok2 = parse_int(parts[2]);
-        if ok1 && ok2 { tcprouter::post(tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
+        if ok1 && ok2 { tcprouter::post(io, tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
     }
 }
 
 thread_fn control() {
+    var io = epoll_ext::Loop { .. };                    // only names the wake operation; it never runs
     var pending: u8[>..] = [];
     var chunk: u8[256] = [0; 256];
     loop {
@@ -201,7 +215,7 @@ thread_fn control() {
         loop {
             let nl = find(pending, "\n");
             if nl < 0 { break; }
-            run_command(pending[..nl]);
+            run_command(io, pending[..nl]);
             let rest = pending.len - nl - 1;
             for k in rest { pending[k] = pending[nl + 1 + k]; }
             pending.pop_n(nl + 1);
@@ -239,11 +253,12 @@ fn main() {
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Handle { tag: tag as u16 }));
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
-    let ids = tcprouter::spawn(cfg, 1, worker);
+    let ids = epoll_ext::spawn(1, cfg, worker);
+    tcprouter::workers_ready(1);
     if control_on {
         thread_spawn(control);
         for id in ids { thread_wait(id); }
     } else {
-        tcprouter::wait_for_signal_then_drain(5000);
+        epoll_ext::wait_for_signal_then_drain(5000);
     }
 }

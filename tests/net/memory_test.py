@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# Proves: RT-5a RT-5b   (an idle forwarded connection holds no pool buffer; and costs at most 512 bytes)
+# Proves: RT-5a RT-5b   (an idle forwarded connection holds no pool buffer; and costs at most 1024 bytes)
 #
 #     tests/net/memory_test.py
 #
 # RT-5a: 1,000 idle connections hold no buffer; a byte in flight borrows one and gives it back.
-# RT-5b: RSS growth over 10,000 idle connections, divided by 10,000, is at most 512 bytes. That needs about
+# RT-5b: RSS growth over 10,000 idle connections, divided by 10,000, is at most 1024 bytes. That needs about
 #        40,000 file descriptors across the driver, the backend and the proxy. The test raises its soft limit to the
 #        hard limit first (524288 on this host). If that is still too low the test FAILS with the numbers: a skip is
 #        not a pass, the row is done only when it has run.
@@ -88,9 +88,9 @@ def rt5b():
         time.sleep(1)
         after = server.rss_kb()
         per = (after - base) * 1024 / N
-        t.note(f"RT-5b measured: RSS {base} kB -> {after} kB over {N} idle connections = {per:.0f} bytes each (limit 512)")
+        t.note(f"RT-5b measured: RSS {base} kB -> {after} kB over {N} idle connections = {per:.0f} bytes each (limit 1024)")
         t.check(server.total("open") == N, f"RT-5b {N} idle connections are open (saw {server.total('open')})")
-        t.check(per <= 512, f"RT-5b memory per idle connection is at most 512 bytes (measured {per:.0f})")
+        t.check(per <= 1024, f"RT-5b memory per idle connection is at most 1024 bytes (measured {per:.0f})")
         for c in conns: c.close()
     finally:
         server.stop(); backend.stop()

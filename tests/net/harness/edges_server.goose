@@ -11,8 +11,10 @@
 //   DO FWDHOLE        forward(it, [127.0.0.1:1 (refused), a cleared slot]): the first address fails and there is nothing left to retry; prints `FWDHOLE true|false`
 //   DO STATS          prints `STATS retries=N`
 //   DO FWDONEOF x     when x's peer half-closes (PeerEof), try forward(x, 127.0.0.1:1): prints `FWD_ON_EOF x true|false`
-//   DO DIAL ADDR MS   w.dial(ADDR, 7, MS) as connection `#`: prints `DIAL_OPENED` or `CLOSED # why`
+//   DO DIAL ADDR MS   w.dial(io, ADDR, 7, MS) as connection `#`: prints `DIAL_OPENED` or `CLOSED # why`
 // Prints: READY, `DATA x n` (a read that is not a command), `WRITABLE x`, `CLOSED x why`, and the lines above.
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
 import tcprouter from "../../..";
 import std;
 import os;
@@ -54,42 +56,42 @@ fn forward_target() -> tcprouter::Target {
 }
 
 // Sends full buffers until `k` more of the pool's buffers hold unsent bytes (the socket is full, so the queue keeps them).
-fn hold(w: tcprouter::Worker&, conn: tcprouter::Conn, k: i64) {
+fn hold(w: tcprouter::Worker&, io: epoll_ext::Loop&, conn: tcprouter::Conn, k: i64) {
     var chunk: u8[65536] = [120; 65536];
     let size = BUFFER_SIZE;
-    let start = w.stats().buffers_in_use;
+    let start = w.snapshot(io).buffers_in_use;
     var sent = 0;
     for step in 200000 {
-        if w.stats().buffers_in_use - start >= k { break; }
-        if !w.send(conn, chunk[..size]) { break; }
+        if w.snapshot(io).buffers_in_use - start >= k { break; }
+        if !w.send(io, conn, chunk[..size]) { break; }
         sent++;
     }
-    print("HELD in_use=", w.stats().buffers_in_use, " sent=", sent);
+    print("HELD in_use=", w.snapshot(io).buffers_in_use, " sent=", sent);
 }
 
-fn run_command(w: tcprouter::Worker&, st: State&, line: const u8[:]) {
+fn run_command(w: tcprouter::Worker&, io: epoll_ext::Loop&, st: State&, line: const u8[:]) {
     let parts = words(line);
     if parts.len < 2 { return; }
     if parts[0] != "DO" { return; }
     let verb = parts[1];
-    if verb == "STATS" { print("STATS retries=", w.stats().retries); return; }
+    if verb == "STATS" { print("STATS retries=", w.snapshot(io).retries); return; }
     if verb == "SHUTFWD" {
-        w.shutdown_write(st.last);
-        print("FWD_AFTER_SHUT ", w.forward(st.last, forward_target()));
+        w.shutdown_write(io, st.last);
+        print("FWD_AFTER_SHUT ", w.forward(io, st.last, forward_target()));
         return;
     }
     if verb == "FWDHOLE" {
         var t = forward_target();
         t.addrs.push(tcprouter::Addr { text: [] });
-        print("FWDHOLE ", w.forward(st.last, t));
+        print("FWDHOLE ", w.forward(io, st.last, t));
         return;
     }
     if verb == "FWDONEOF" { st.eof_conn = st.last; st.eof_armed = true; return; }
     if verb == "DIAL" && parts.len == 4 {
         let ms, ok = parse_int(parts[3]);
         if !ok { return; }
-        let conn = w.dial(parts[2], 7, ms);
-        w.set_user(conn, DIAL_USER);
+        let conn = w.dial(io, parts[2], 7, ms);
+        w.set_user(io, conn, DIAL_USER);
         return;
     }
     if parts.len < 3 { return; }
@@ -98,19 +100,19 @@ fn run_command(w: tcprouter::Worker&, st: State&, line: const u8[:]) {
     let conn = st.conns[k];
     if verb == "HOLD" && parts.len == 4 {
         let n, ok = parse_int(parts[3]);
-        if ok { hold(w, conn, n); }
+        if ok { hold(w, io, conn, n); }
     } else if verb == "SEND" {
-        let ok = w.send(conn, "pong");
+        let ok = w.send(io, conn, "pong");
         print("SEND ", name_of(k as u32), " ", ok);
         if !ok { st.retry[k] = true; }
     } else if verb == "SENDBIG" {
         var chunk: u8[65536] = [120; 65536];
-        let ok = w.send(conn, chunk[..BUFFER_SIZE * 5 + 1]);
+        let ok = w.send(io, conn, chunk[..BUFFER_SIZE * 5 + 1]);
         print("SENDBIG ", name_of(k as u32), " ", ok);
     }
 }
 
-fn run_script(w: tcprouter::Worker&, st: State&) {
+fn run_script(w: tcprouter::Worker&, io: epoll_ext::Loop&, st: State&) {
     var text: u8[>..] = [];
     text.append(st.script[..]);
     st.script.clear();
@@ -118,12 +120,12 @@ fn run_script(w: tcprouter::Worker&, st: State&) {
     while pos < text.len {
         let nl = find(text[pos..], "\n");
         if nl < 0 { break; }
-        run_command(w, st, text[pos..pos + nl]);
+        run_command(w, io, st, text[pos..pos + nl]);
         pos += nl + 1;
     }
 }
 
-fn on_data(w: tcprouter::Worker&, st: State&, conn: tcprouter::Conn, user: u32, bytes: const u8[:]) {
+fn on_data(w: tcprouter::Worker&, io: epoll_ext::Loop&, st: State&, conn: tcprouter::Conn, user: u32, bytes: const u8[:]) {
     var text: u8[>..] = [];
     text.append(bytes);
     var pos = 0;
@@ -136,7 +138,7 @@ fn on_data(w: tcprouter::Worker&, st: State&, conn: tcprouter::Conn, user: u32, 
         let parts = words(line);
         if parts.len == 2 && parts[0] == "NAME" {
             let k = index_of(parts[1]);
-            if k >= 0 { st.conns[k] = conn; w.set_user(conn, k as u32); }
+            if k >= 0 { st.conns[k] = conn; w.set_user(io, conn, k as u32); }
             commands++;
         } else if parts.len >= 2 && parts[0] == "DO" {
             if st.script.len + line.len + 1 <= st.script.cap { st.script.append(line); st.script.append("\n"); }
@@ -146,41 +148,52 @@ fn on_data(w: tcprouter::Worker&, st: State&, conn: tcprouter::Conn, user: u32, 
     if commands == 0 { print("DATA ", name_of(user), " ", bytes.len); }
 }
 
-fn on_peer_eof(w: tcprouter::Worker&, st: State&, conn: tcprouter::Conn, user: u32) {
+fn on_peer_eof(w: tcprouter::Worker&, io: epoll_ext::Loop&, st: State&, conn: tcprouter::Conn, user: u32) {
     if st.eof_armed && conn.slot == st.eof_conn.slot && conn.gen == st.eof_conn.gen {
         st.eof_armed = false;
-        print("FWD_ON_EOF ", w.forward(conn, forward_target()));
+        print("FWD_ON_EOF ", w.forward(io, conn, forward_target()));
         return;
     }
-    w.close(conn);
+    w.close(io, conn);
 }
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
+    var io = epoll_ext::Loop { .. };
+    io.limits.peek_bound = 32768;
+    io.limits.buffer_size = cfg.limits.buffer_size;
+    io.limits.buffers_per_loop = cfg.limits.buffers_per_worker;
+    io.limits.batch_min_events = cfg.limits.batch_min_events;
+    io.limits.batch_max_wait_us = cfg.limits.batch_max_wait_us;
+    io.limits.max_links = cfg.limits.max_conns_per_worker;
+    io.limits.connect_timeout_ms = cfg.limits.connect_timeout_ms;
+    io.limits.idle_timeout_ms = cfg.limits.idle_timeout_ms;
+    io.limits.half_close_timeout_ms = cfg.limits.half_close_timeout_ms;
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) { write_stderr(str("edges_server: ", w.error, "\n")); return; }
+    if !w.start(io, cfg, index) { epoll_ext::report_failed_start(); write_stderr(str("edges_server: ", w.error, "\n")); return; }
+    io.attach(index);
     var st = State { conns: [tcprouter::Conn { slot: 0, gen: 0 }; 8], retry: [false; 8], script: [], last: tcprouter::Conn { slot: 0, gen: 0 }, eof_conn: tcprouter::Conn { slot: 0, gen: 0 }, eof_armed: false };
     print("READY");
-    w.serve() { w, ev =>
+    io.serve() { io, ev => w.on_event(io, ev) { w, io, ev =>
         match ev {
             Opened o => {
-                if w.user(o.conn) == DIAL_USER { print("DIAL_OPENED"); }
-                else { st.last = o.conn; w.set_user(o.conn, UNNAMED); w.set_keep_open_on_eof(o.conn, true); }
+                if w.user(io, o.conn) == DIAL_USER { print("DIAL_OPENED"); }
+                else { st.last = o.conn; w.set_user(io, o.conn, UNNAMED); w.set_keep_open_on_eof(io, o.conn, true); }
             },
-            Data d => { on_data(w, st, d.conn, d.user, d.bytes); },
+            Data d => { on_data(w, io, st, d.conn, d.user, d.bytes); },
             Writable x => {
                 print("WRITABLE ", name_of(x.user));
                 if x.user < 8 && st.retry[x.user as i64] {
-                    let ok = w.send(x.conn, "pong");
+                    let ok = w.send(io, x.conn, "pong");
                     print("RETRY ", name_of(x.user), " ", ok);
                     st.retry[x.user as i64] = !ok;
                 }
             },
-            PeerEof e => { on_peer_eof(w, st, e.conn, e.user); },
+            PeerEof e => { on_peer_eof(w, io, st, e.conn, e.user); },
             Closed c => { print("CLOSED ", name_of(c.user), " ", c.why); },
-            Tick t => { if st.script.len > 0 { run_script(w, st); } },
+            Tick t => { if st.script.len > 0 { run_script(w, io, st); } },
             _ => {},
         }
-    };
+    }; };
 }
 
 fn main() {
@@ -201,6 +214,7 @@ fn main() {
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Handle { tag: 7 }));
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
-    let ids = tcprouter::spawn(cfg, 1, worker);
-    tcprouter::wait_for_signal_then_drain(2000);
+    let ids = epoll_ext::spawn(1, cfg, worker);
+    tcprouter::workers_ready(1);
+    epoll_ext::wait_for_signal_then_drain(2000);
 }

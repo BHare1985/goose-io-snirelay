@@ -10,6 +10,8 @@
 //   GET /trickle  opts in, then sends one byte on every Tick until send says false (fencing must end it)
 //   GET /plain/N  like /N but WITHOUT the opt-in (the default: the connection closes after the peer's EOF, queued bytes flushed first)
 // stdout: READY, PEER_EOF (once per connection that opted in), CLOSED why=W, ROOM ...
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
 import tcprouter from "../../..";
 import slot_pool;
 import std;
@@ -30,124 +32,136 @@ struct Session {
 
 var LISTEN: u8[>..] = [];
 
-fn pump(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn) {
+fn pump(w: tcprouter::Worker&, io: epoll_ext::Loop&, s: Session&, conn: tcprouter::Conn) {
     while s.left > 0 {
         let n = if s.left < 16384 { s.left } else { 16384 };
         var piece: u8[16384] = [0; 16384];
         for k in n { piece[k] = ((s.at + k) % PERIOD) as! u8; }
-        if !w.send(conn, piece[..n]) { return; }
+        if !w.send(io, conn, piece[..n]) { return; }
         s.left -= n; s.at += n;
     }
     if !s.done {
         s.done = true;
-        w.shutdown_write(conn);
-        print("SEND_AFTER_SHUTDOWN ", w.send(conn, "x"));       // must be false
+        w.shutdown_write(io, conn);
+        print("SEND_AFTER_SHUTDOWN ", w.send(io, conn, "x"));       // must be false
     }
 }
 
-fn room_probe(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn) {
+fn room_probe(w: tcprouter::Worker&, io: epoll_ext::Loop&, s: Session&, conn: tcprouter::Conn) {
     // first call: measure, send 1000 bytes, measure, then fill the queue until send says no
     if !s.room_probe {
         s.room_probe = true;
-        s.fresh = w.send_room(conn);
+        s.fresh = w.send_room(io, conn);
         var k: u8[1000] = [7; 1000];
-        w.send(conn, k[..]);
-        s.after1000 = w.send_room(conn);
+        w.send(io, conn, k[..]);
+        s.after1000 = w.send_room(io, conn);
         var big: u8[16384] = [9; 16384];
-        while w.send(conn, big[..]) { }
-        print("ROOM fresh=", s.fresh, " after1000=", s.after1000, " full=", w.send_room(conn));
+        while w.send(io, conn, big[..]) { }
+        print("ROOM fresh=", s.fresh, " after1000=", s.after1000, " full=", w.send_room(io, conn));
         return;                                   // the rest on Writable
     }
-    print("ROOM after_drain=", w.send_room(conn));
-    w.close(conn);
+    print("ROOM after_drain=", w.send_room(io, conn));
+    w.close(io, conn);
 }
 
-fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32, bytes: const u8[:]) {
+fn on_data(w: tcprouter::Worker&, io: epoll_ext::Loop&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32, bytes: const u8[:]) {
     if user == 0 || (user - 1) as i64 >= sessions.items.len { return; }
     let s .= sessions.items[(user - 1) as i64];
     print("EV data ", bytes.len);
-    if s.req.len + bytes.len > s.req.cap { w.close(conn); return; }
+    if s.req.len + bytes.len > s.req.cap { w.close(io, conn); return; }
     s.req.append(bytes);
     let end = find(s.req, "\r\n\r\n");
     if end < 0 || s.left > 0 || s.done { return; }
     let line = s.req[..find(s.req, "\r\n")];
     let target = line[4..find(line[4..], " ") + 4];
-    if target == "/room" { room_probe(w, s, conn); return; }
+    if target == "/room" { room_probe(w, io, s, conn); return; }
     if target == "/draining" {
-        let text = if w.draining() { "1" } else { "0" };
+        let text = if w.draining(io) { "1" } else { "0" };
         var out: u8[>..] = [];
         format(out, "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n", text);
-        w.send(conn, out);
+        w.send(io, conn, out);
         s.req.clear();
         return;
     }
-    if target == "/hang" { w.set_keep_open_on_eof(conn, true); return; }
-    if target == "/trickle" { w.set_keep_open_on_eof(conn, true); s.trickle = true; return; }
+    if target == "/hang" { w.set_keep_open_on_eof(io, conn, true); return; }
+    if target == "/trickle" { w.set_keep_open_on_eof(io, conn, true); s.trickle = true; return; }
     var skip: i64 = 1;
     var keep = true;
     if target.len > 7 && target[..7] == "/plain/" { skip = 7; keep = false; }
     let n, ok = parse_int(target[skip..]);
-    if !ok { w.close(conn); return; }
-    if keep { w.set_keep_open_on_eof(conn, true); }
+    if !ok { w.close(io, conn); return; }
+    if keep { w.set_keep_open_on_eof(io, conn, true); }
     s.left = n; s.at = 0;
-    pump(w, s, conn);
+    pump(w, io, s, conn);
 }
 
-fn on_writable(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32) {
+fn on_writable(w: tcprouter::Worker&, io: epoll_ext::Loop&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32) {
     if user == 0 || (user - 1) as i64 >= sessions.items.len { return; }
     let s .= sessions.items[(user - 1) as i64];
-    if s.room_probe { room_probe(w, s, conn); } else { pump(w, s, conn); }
+    if s.room_probe { room_probe(w, io, s, conn); } else { pump(w, io, s, conn); }
 }
 
 // /trickle: one byte per Tick, after the peer's EOF as well, until send says false.
-fn on_tick(w: tcprouter::Worker&, sessions: slot_pool<Session>&) {
+fn on_tick(w: tcprouter::Worker&, io: epoll_ext::Loop&, sessions: slot_pool<Session>&) {
     for i in sessions.items.len {
         let s .= sessions.items[i];
         if s.trickle && !s.done {
-            if !w.send(s.conn_self, "t") { s.done = true; print("TRICKLE_FALSE"); }
+            if !w.send(io, s.conn_self, "t") { s.done = true; print("TRICKLE_FALSE"); }
         }
     }
 }
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var sessions = slot_pool<Session> {};
+    var io = epoll_ext::Loop { .. };
+    io.limits.peek_bound = 32768;
+    io.limits.buffer_size = cfg.limits.buffer_size;
+    io.limits.buffers_per_loop = cfg.limits.buffers_per_worker;
+    io.limits.batch_min_events = cfg.limits.batch_min_events;
+    io.limits.batch_max_wait_us = cfg.limits.batch_max_wait_us;
+    io.limits.max_links = cfg.limits.max_conns_per_worker;
+    io.limits.connect_timeout_ms = cfg.limits.connect_timeout_ms;
+    io.limits.idle_timeout_ms = cfg.limits.idle_timeout_ms;
+    io.limits.half_close_timeout_ms = cfg.limits.half_close_timeout_ms;
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) { write_stderr(str("halfclose_server: ", w.error, "\n")); return; }
+    if !w.start(io, cfg, index) { epoll_ext::report_failed_start(); write_stderr(str("halfclose_server: ", w.error, "\n")); return; }
+    io.attach(index);
     print("READY");
-    w.serve() { w, ev =>
+    io.serve() { io, ev => w.on_event(io, ev) { w, io, ev =>
         match ev {
             Opened o => {
                 let id = sessions.alloc_index(Session { left: 0, at: 0, req: [], done: false, room_probe: false, fresh: 0, after1000: 0, trickle: false, conn_self: o.conn });
-                w.set_user(o.conn, (id + 1) as u32);
+                w.set_user(io, o.conn, (id + 1) as u32);
             },
-            Data d => { on_data(w, sessions, d.conn, d.user, d.bytes); },
-            Writable x => { on_writable(w, sessions, x.conn, x.user); },
+            Data d => { on_data(w, io, sessions, d.conn, d.user, d.bytes); },
+            Writable x => { on_writable(w, io, sessions, x.conn, x.user); },
             PeerEof e => { print("PEER_EOF"); },
-            Tick k => { on_tick(w, sessions); },
+            Tick k => { on_tick(w, io, sessions); },
             Closed c => {
                 print("CLOSED why=", c.why);
                 if c.user > 0 && (c.user - 1) as i64 < sessions.items.len { sessions.free((c.user - 1) as i64); }
             },
             _ => {},
         }
-    };
+    }; };
 }
 
 extern fn read(fd: i32, buf: u8&, n: u64) -> i64;
 
-fn run_command(line: const u8[:]) {
+fn run_command(io: epoll_ext::Loop&, line: const u8[:]) {
     let parts = words(line);
     if parts.len == 3 && parts[0] == "deadline" {
         let tag, ok1 = parse_int(parts[1]);
         let until, ok2 = parse_int(parts[2]);
-        if ok1 && ok2 { tcprouter::post(tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
+        if ok1 && ok2 { tcprouter::post(io, tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
     } else if parts.len == 2 && parts[0] == "drain" {
         let ms, ok = parse_int(parts[1]);
-        if ok { tcprouter::post(tcprouter::Message.Drain { deadline_ms: ms }); }
+        if ok { tcprouter::post(io, tcprouter::Message.Drain { deadline_ms: ms }); }
     }
 }
 
 thread_fn control() {
+    var io = epoll_ext::Loop { .. };                    // only names the wake operation; it never runs
     var pending: u8[>..] = [];
     var chunk: u8[256] = [0; 256];
     loop {
@@ -157,7 +171,7 @@ thread_fn control() {
         loop {
             let nl = find(pending, "\n");
             if nl < 0 { break; }
-            run_command(pending[..nl]);
+            run_command(io, pending[..nl]);
             let rest = pending.len - nl - 1;
             for k in rest { pending[k] = pending[nl + 1 + k]; }
             pending.pop_n(nl + 1);
@@ -179,7 +193,8 @@ fn main() {
 
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
-    let ids = tcprouter::spawn(cfg, 1, worker);
+    let ids = epoll_ext::spawn(1, cfg, worker);
+    tcprouter::workers_ready(1);
     thread_spawn(control);
     for id in ids { thread_wait(id); }
 }

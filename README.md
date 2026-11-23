@@ -35,14 +35,18 @@ Forward one port to two backends (this is `examples/forward_port.goose`, copied 
 //     goose build examples/forward_port.goose && ./examples/forward_port
 //
 import tcprouter from "..";
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
+    var io = epoll_ext::Loop { .. };
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) {
+    if !w.start(io, cfg, index) {
         print("worker ", index, ": ", w.error);
         return;
     }
-    w.serve() { w, ev => };          // forward-only: nothing to handle
+    io.attach(index);
+    io.serve() { io, ev => w.on_event(io, ev); };          // forward-only: nothing to handle
 }
 
 fn main() {
@@ -55,8 +59,8 @@ fn main() {
         print(problems);
         exit(2);
     }
-    tcprouter::spawn(cfg, tcprouter::cpu_count(), worker);
-    tcprouter::wait_for_signal_then_drain(30000);
+    epoll_ext::spawn(epoll_ext::cpu_count(), cfg, worker);
+    epoll_ext::wait_for_signal_then_drain(30000);
 }
 ```
 

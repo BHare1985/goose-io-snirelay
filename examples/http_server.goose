@@ -19,6 +19,9 @@
 //    when there is room and the same function continues from the same offsets. Nothing is copied to "retry".
 //  * The block you pass to serve only calls named functions: a `return` inside it would leave the worker.
 import tcprouter from "..";
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
+
 import slot_pool;
 import std;
 import os;
@@ -126,7 +129,7 @@ fn begin_response(s: Session&, status: const u8[:], ctype: const u8[:], total: i
 // Sends the response in pieces; stops when send() refuses (nothing of that piece was queued) and Writable continues.
 // The head and the first CHUNK - head bytes of the body go out in one send (one system call for any response that fits); the
 // rest follows in windows of CHUNK bytes sent straight from the pattern or the file, so `send`'s copy into its queue is the only one.
-fn send_pieces(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn, pattern: const u8[:]) {
+fn send_pieces(w: tcprouter::Worker&, io: epoll_ext::Loop&, s: Session&, conn: tcprouter::Conn, pattern: const u8[:]) {
     while s.busy {
         var want = 0;
         var queued = false;
@@ -139,14 +142,14 @@ fn send_pieces(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn, patter
             } else {
                 piece.append(pattern[s.offset % PERIOD..s.offset % PERIOD + want]);
             }
-            queued = w.send(conn, piece);
+            queued = w.send(io, conn, piece);
         } else {
             want = if s.total - s.offset < CHUNK { s.total - s.offset } else { CHUNK };
             if s.file >= 0 {
-                queued = w.send(conn, FILE_BYTES[FILES[s.file].at + s.offset..FILES[s.file].at + s.offset + want]);
+                queued = w.send(io, conn, FILE_BYTES[FILES[s.file].at + s.offset..FILES[s.file].at + s.offset + want]);
             } else {
                 let start = s.offset % PERIOD;                      // the pattern repeats every 251 bytes
-                queued = w.send(conn, pattern[start..start + want]);
+                queued = w.send(io, conn, pattern[start..start + want]);
             }
         }
         if !queued { return; }                                      // nothing of that piece was queued: the same piece on Writable
@@ -154,7 +157,7 @@ fn send_pieces(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn, patter
         s.offset += want;
         if s.offset >= s.total {
             s.busy = false;
-            if s.close_after { w.close(conn); }
+            if s.close_after { w.close(io, conn); }
         }
     }
 }
@@ -178,9 +181,9 @@ fn consume(s: Session&, n: i64) {
 }
 
 // Takes complete requests out of the inbox, one at a time, for as long as the previous response is out.
-fn process(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn, pattern: const u8[:]) {
+fn process(w: tcprouter::Worker&, io: epoll_ext::Loop&, s: Session&, conn: tcprouter::Conn, pattern: const u8[:]) {
     loop {
-        if s.busy { send_pieces(w, s, conn, pattern); if s.busy { return; } }
+        if s.busy { send_pieces(w, io, s, conn, pattern); if s.busy { return; } }
         if s.skip > 0 {                                             // discard a request body that is still arriving
             let drop = if s.skip < s.inbox.len { s.skip } else { s.inbox.len };
             s.consume(drop);
@@ -192,7 +195,7 @@ fn process(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn, pattern: c
             if s.inbox.len >= MAX_HEAD {                            // no end of head within the limit
                 begin_response(s, "431 Request Header Fields Too Large", "text/plain", 0, -1, true, true);
                 s.inbox.clear();
-                send_pieces(w, s, conn, pattern);
+                send_pieces(w, io, s, conn, pattern);
             }
             return;
         }
@@ -200,7 +203,7 @@ fn process(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn, pattern: c
         if !r.ok {
             begin_response(s, "400 Bad Request", "text/plain", 0, -1, true, true);
             s.inbox.clear();
-            send_pieces(w, s, conn, pattern);
+            send_pieces(w, io, s, conn, pattern);
             return;
         }
         s.skip = r.body;
@@ -209,7 +212,7 @@ fn process(w: tcprouter::Worker&, s: Session&, conn: tcprouter::Conn, pattern: c
     }
 }
 
-fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, pattern: const u8[:], conn: tcprouter::Conn, user: u32,
+fn on_data(w: tcprouter::Worker&, io: epoll_ext::Loop&, sessions: slot_pool<Session>&, pattern: const u8[:], conn: tcprouter::Conn, user: u32,
            bytes: const u8[:]) {
     if user >= sessions.items.len { return; }                       // the id comes back from the engine; check it anyway
     let s .= sessions.items[user];
@@ -221,30 +224,32 @@ fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, pattern: const 
     } else {
         s.inbox.append(bytes);
     }
-    process(w, s, conn, pattern);
+    process(w, io, s, conn, pattern);
 }
 
-fn on_writable(w: tcprouter::Worker&, sessions: slot_pool<Session>&, pattern: const u8[:], conn: tcprouter::Conn, user: u32) {
+fn on_writable(w: tcprouter::Worker&, io: epoll_ext::Loop&, sessions: slot_pool<Session>&, pattern: const u8[:], conn: tcprouter::Conn, user: u32) {
     if user >= sessions.items.len { return; }
     let s .= sessions.items[user];
-    if s.live { process(w, s, conn, pattern); }
+    if s.live { process(w, io, s, conn, pattern); }
 }
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var sessions = slot_pool<Session> {};
     var pattern: u8[>..] = [];
     for i in PERIOD * 140 { pattern.push((i % PERIOD) as! u8); }    // a long enough run that any CHUNK window is a slice of it
+    var io = epoll_ext::Loop { .. };
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) { print(w.error); return; }
-    w.serve() { w, ev =>
-        match ev {
+    if !w.start(io, cfg, index) { print(w.error); return; }
+    io.attach(index);
+    io.serve() { io, ev => w.on_event(io, ev) { w, io, e =>
+        match e {
             Opened o => {
                 let i = sessions.alloc_index(Session { live: true, inbox: [], skip: 0, busy: false, head: [], head_sent: false,
                                                        close_after: false, file: -1, offset: 0, total: 0 });
-                w.set_user(o.conn, i as u32);
+                w.set_user(io, o.conn, i as u32);
             },
-            Data d => { on_data(w, sessions, pattern, d.conn, d.user, d.bytes); },
-            Writable x => { on_writable(w, sessions, pattern, x.conn, x.user); },
+            Data d => { on_data(w, io, sessions, pattern, d.conn, d.user, d.bytes); },
+            Writable x => { on_writable(w, io, sessions, pattern, x.conn, x.user); },
             Closed c => {
                 if c.user < sessions.items.len {
                     sessions.items[c.user].live = false;
@@ -253,7 +258,7 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
             },
             _ => {},
         }
-    };
+    }; };
 }
 
 // --- startup ---------------------------------------------------------------------------------------------------
@@ -295,7 +300,7 @@ fn load_tree(root: const u8[:]) {
 fn main() {
     let a = args();
     var port = "8080";
-    var workers = tcprouter::cpu_count();
+    var workers = epoll_ext::cpu_count();
     var root = "";
     var i = 1;
     while i < a.len {
@@ -313,6 +318,6 @@ fn main() {
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Handle { tag: 1 }));
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
-    tcprouter::spawn(cfg, workers, worker);
-    tcprouter::wait_for_signal_then_drain(30000);
+    epoll_ext::spawn(workers, cfg, worker);
+    epoll_ext::wait_for_signal_then_drain(30000);
 }

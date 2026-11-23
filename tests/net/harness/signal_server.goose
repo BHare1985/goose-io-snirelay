@@ -3,6 +3,8 @@
 //     signal_server --listen 127.0.0.1:9000 --to 127.0.0.1:9100 [--deadline MS]
 //
 // Prints READY, then after a signal `SIGNAL n`, after the drain `DRAINED k` (k = open sessions closed at the deadline, 0 = every session ended).
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
 import tcprouter from "../../..";
 import std;
 import os;
@@ -12,9 +14,20 @@ var TARGET: u8[>..] = [];
 var DEADLINE: i64 = 500;
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
+    var io = epoll_ext::Loop { .. };
+    io.limits.peek_bound = 32768;
+    io.limits.buffer_size = cfg.limits.buffer_size;
+    io.limits.buffers_per_loop = cfg.limits.buffers_per_worker;
+    io.limits.batch_min_events = cfg.limits.batch_min_events;
+    io.limits.batch_max_wait_us = cfg.limits.batch_max_wait_us;
+    io.limits.max_links = cfg.limits.max_conns_per_worker;
+    io.limits.connect_timeout_ms = cfg.limits.connect_timeout_ms;
+    io.limits.idle_timeout_ms = cfg.limits.idle_timeout_ms;
+    io.limits.half_close_timeout_ms = cfg.limits.half_close_timeout_ms;
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) { write_stderr(str("signal_server: ", w.error, "\n")); return; }
-    w.serve() { w, ev => };
+    if !w.start(io, cfg, index) { epoll_ext::report_failed_start(); write_stderr(str("signal_server: ", w.error, "\n")); return; }
+    io.attach(index);
+    io.serve() { io, ev => w.on_event(io, ev); };
 }
 
 fn main() {
@@ -33,10 +46,11 @@ fn main() {
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, t) }));
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
-    tcprouter::spawn(cfg, 2, worker);
+    epoll_ext::spawn(2, cfg, worker);
+    tcprouter::workers_ready(2);
     print("READY");
-    let sig = tcprouter::wait_for_signal();
+    let sig = epoll_ext::wait_for_signal();
     print("SIGNAL ", sig);
-    let closed = tcprouter::drain(DEADLINE);
+    let closed = epoll_ext::drain(DEADLINE);
     print("DRAINED ", closed);
 }

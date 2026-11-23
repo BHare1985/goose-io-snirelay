@@ -21,6 +21,8 @@
 //     READY <worker index>                      after start() succeeded
 //     STAT <worker> accepted=… open=… … buffer_waits=…   every --stat-ms, from a Tick event
 // Errors go to stderr. Exit status 2 for a bad command line or config.
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
 import tcprouter from "../../..";
 import std;
 import os;
@@ -51,7 +53,6 @@ root struct Options {
 // How often a worker prints STAT. A global set in main before the workers start: workers get a copy.
 var STAT_MS: i64 = 1000;
 var WORKERS: i64 = 1;
-
 fn die(message: const u8[:]) {
     write_stderr(str("forward_server: ", message, "\n"));
     exit(2);
@@ -65,8 +66,8 @@ fn number(text: const u8[:], what: const u8[:]) -> i64 {
 
 // --- one worker -----------------------------------------------------------------------------------------
 
-fn print_stats(w: tcprouter::Worker&, index: i64) {
-    let s = w.stats();
+fn print_stats(w: tcprouter::Worker&, io: epoll_ext::Loop&, index: i64) {
+    let s = w.snapshot(io);
     var line: u8[>..] = [];
     format(line, "STAT ", index, " accepted=", s.accepted, " open=", s.open,
            " bytes_in=", s.bytes_in, " bytes_out=", s.bytes_out,
@@ -81,12 +82,12 @@ fn print_stats(w: tcprouter::Worker&, index: i64) {
 }
 
 // The serve block only calls this: a `return` in the block would leave the whole worker.
-fn on_event(w: tcprouter::Worker&, ev: tcprouter::Event, index: i64, every_ms: i64, last: i64&) {
+fn on_tick(w: tcprouter::Worker&, io: epoll_ext::Loop&, ev: goose_io::Event, index: i64, every_ms: i64, last: i64&) {
     match ev {
         Tick t => {
             if t.now_ms - last >= every_ms {
                 last = t.now_ms;
-                print_stats(w, index);
+                print_stats(w, io, index);
             }
         },
         _ => {},
@@ -94,17 +95,29 @@ fn on_event(w: tcprouter::Worker&, ev: tcprouter::Event, index: i64, every_ms: i
 }
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
+    var io = epoll_ext::Loop { .. };
+    io.limits.peek_bound = 32768;
+    io.limits.buffer_size = cfg.limits.buffer_size;
+    io.limits.buffers_per_loop = cfg.limits.buffers_per_worker;
+    io.limits.batch_min_events = cfg.limits.batch_min_events;
+    io.limits.batch_max_wait_us = cfg.limits.batch_max_wait_us;
+    io.limits.max_links = cfg.limits.max_conns_per_worker;
+    io.limits.connect_timeout_ms = cfg.limits.connect_timeout_ms;
+    io.limits.idle_timeout_ms = cfg.limits.idle_timeout_ms;
+    io.limits.half_close_timeout_ms = cfg.limits.half_close_timeout_ms;
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) {
+    if !w.start(io, cfg, index) {
         write_stderr(str("forward_server: worker ", index, ": ", w.error, "\n"));
         qput(Started { worker: index, ok: false });
+        epoll_ext::report_failed_start();
         return;
     }
+    io.attach(index);
     qput(Started { worker: index, ok: true });
     print("READY ", index);
     var last: i64 = 0;
     let every_ms = STAT_MS;
-    w.serve() { w, ev => on_event(w, ev, index, every_ms, last); };
+    io.serve() { io, ev => { w.on_event(io, ev); on_tick(w, io, ev, index, every_ms, last); }; };
 }
 
 // One line with the whole program's counters, as gather_stats summed them.
@@ -125,26 +138,26 @@ fn print_totals(s: tcprouter::Stats) {
 // stdin is read with the raw read(2), not os::read_line: a thread blocked in stdio holds stdin's lock, and exit() then waits for it forever.
 extern fn read(fd: i32, buf: u8&, n: u64) -> i64;
 
-fn run_command(line: const u8[:]) {
+fn run_command(io: epoll_ext::Loop&, line: const u8[:]) {
     let space = find(line, " ");
     let verb = if space < 0 { line[..] } else { line[..space] };
     let rest = if space < 0 { line[line.len..] } else { line[space + 1..] };
     let parts = words(rest);
     if verb == "drain" {
         let ms, ok = parse_int(rest);
-        if ok { tcprouter::post(tcprouter::Message.Drain { deadline_ms: ms }); }
+        if ok { tcprouter::post(io, tcprouter::Message.Drain { deadline_ms: ms }); }
     } else if verb == "deadline" && parts.len == 2 {
         let tag, ok1 = parse_int(parts[0]);
         let until, ok2 = parse_int(parts[1]);
-        if ok1 && ok2 { tcprouter::post(tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
+        if ok1 && ok2 { tcprouter::post(io, tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
     } else if verb == "replace-deadline" && parts.len == 2 {
         let tag, ok1 = parse_int(parts[0]);
         let until, ok2 = parse_int(parts[1]);       // 0 is valid here, parse_int accepts it
         if ok1 && ok2 {
-            tcprouter::post(tcprouter::Message.ReplaceDeadline { tag: tag as u16, until_ms: until });
+            tcprouter::post(io, tcprouter::Message.ReplaceDeadline { tag: tag as u16, until_ms: until });
             // A gather goes through the same pipes after the message, so when it returns every worker has applied it: the program
             // can now say so. A caller that freezes the process right after the command (verify_backends t_lease) must wait for this.
-            let s = tcprouter::gather_stats(WORKERS);
+            let s = tcprouter::gather_stats(io, WORKERS);
             print("ACK replace-deadline");
         }
     } else if verb == "set-addr" && parts.len == 3 {
@@ -153,20 +166,21 @@ fn run_command(line: const u8[:]) {
         if ok1 && ok2 && target >= 0 && target < 65536 && slot >= 0 && slot < 256 {       // out of range: not a message at all
             var text: u8[>..] = [];
             if parts[2] != "-" { text.append(parts[2]); }
-            tcprouter::post(tcprouter::Message.SetAddr { target: target as u16, slot: slot as u8, addr: tcprouter::addr(text) });
+            tcprouter::post(io, tcprouter::Message.SetAddr { target: target as u16, slot: slot as u8, addr: tcprouter::addr(text) });
         }
     } else if verb == "close-tagged" && parts.len == 2 {
         let tag, ok1 = parse_int(parts[0]);
         let gen, ok2 = parse_int(parts[1]);
-        if ok1 && ok2 { tcprouter::post(tcprouter::Message.CloseTagged { tag: tag as u16, gen: gen as u32 }); }
+        if ok1 && ok2 { tcprouter::post(io, tcprouter::Message.CloseTagged { tag: tag as u16, gen: gen as u32 }); }
     } else if verb == "stats" {
-        print_totals(tcprouter::gather_stats(WORKERS));
+        print_totals(tcprouter::gather_stats(io, WORKERS));
     }
 }
 
 // Reads commands from stdin and turns them into messages to the workers: the pattern a real program uses for its control
 // protocol. It runs after spawn(), so it has the message pipes (globals are copied to a thread when it starts).
 thread_fn control() {
+    var io = epoll_ext::Loop { .. };                    // only names the wake operation; it never runs
     var pending: u8[>..] = [];
     var chunk: u8[256] = [0; 256];
     loop {
@@ -176,7 +190,7 @@ thread_fn control() {
         loop {
             let nl = find(pending, "\n");
             if nl < 0 { break; }
-            run_command(pending[..nl]);
+            run_command(io, pending[..nl]);
             // drop the line: shift the rest down
             let rest = pending.len - nl - 1;
             for k in rest { pending[k] = pending[nl + 1 + k]; }
@@ -313,7 +327,19 @@ fn main() {
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
 
     WORKERS = o.workers;
-    let ids = tcprouter::spawn(cfg, o.workers, worker);
+    // A port held by another process is an error naming the address and why, not loops quietly sharing it (RT-1d).
+    for l in cfg.listeners {
+        let perr = epoll_ext::probe(l.addr.text[..]);
+        if goose_io::failed(perr) {
+            var text: u8[>..] = [];
+            epoll_ext::describe_listen_failure(l.addr.text[..], perr, text);
+            text.append("\n");
+            write_stderr(text[..]);
+            exit(1);
+        }
+    }
+    let ids = epoll_ext::spawn(o.workers, cfg, worker);
+    tcprouter::workers_ready(o.workers);
     var failed = 0;
     for i in o.workers { if !qget<Started>().ok { failed++; } }
     if failed > 0 { exit(1); }                    // a worker could not start (for instance, the port is taken)
@@ -321,6 +347,6 @@ fn main() {
         thread_spawn(control);
         for id in ids { thread_wait(id); }        // returns when every worker has drained
     } else {
-        tcprouter::wait_for_signal_then_drain(o.drain_ms);
+        epoll_ext::wait_for_signal_then_drain(o.drain_ms);
     }
 }

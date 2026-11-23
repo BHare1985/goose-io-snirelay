@@ -5,6 +5,8 @@
 // Prints: READY, `EV opened`, `EV data N`, `EV closed`, `PASSEND`, `PASSEND_SEND true|false` (a send of 4 bytes "late" to the last connection during PassEnd).
 // A Data event whose bytes start with "slow" sleeps 300 ms inside the handler (so a tag deadline can pass between the event and the PassEnd).
 // stdin: `deadline TAG MS`, `ping` (a Stats gather: a posted message that delivers no handler event).
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
 import tcprouter from "../../..";
 import std;
 import os;
@@ -15,12 +17,23 @@ var BATCH_MIN: i64 = 0;
 var BATCH_WAIT: i64 = 0;
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
+    var io = epoll_ext::Loop { .. };
+    io.limits.peek_bound = 32768;
+    io.limits.buffer_size = cfg.limits.buffer_size;
+    io.limits.buffers_per_loop = cfg.limits.buffers_per_worker;
+    io.limits.batch_min_events = cfg.limits.batch_min_events;
+    io.limits.batch_max_wait_us = cfg.limits.batch_max_wait_us;
+    io.limits.max_links = cfg.limits.max_conns_per_worker;
+    io.limits.connect_timeout_ms = cfg.limits.connect_timeout_ms;
+    io.limits.idle_timeout_ms = cfg.limits.idle_timeout_ms;
+    io.limits.half_close_timeout_ms = cfg.limits.half_close_timeout_ms;
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) { write_stderr(str("passend_server: ", w.error, "\n")); return; }
+    if !w.start(io, cfg, index) { epoll_ext::report_failed_start(); write_stderr(str("passend_server: ", w.error, "\n")); return; }
+    io.attach(index);
     if PASS_END { w.want_pass_end(true); }
     var last = tcprouter::Conn { slot: 0, gen: 0 };
     print("READY");
-    w.serve() { w, ev =>
+    io.serve() { io, ev => w.on_event(io, ev) { w, io, ev =>
         match ev {
             Opened o => { last = o.conn; print("EV opened"); },
             Data d => {
@@ -33,29 +46,30 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
             Closed c => { print("EV closed"); },
             PassEnd p => {
                 print("PASSEND");
-                let ok = w.send(last, "late");
+                let ok = w.send(io, last, "late");
                 print("PASSEND_SEND ", ok);
             },
             _ => {},
         }
-    };
+    }; };
 }
 
 extern fn read(fd: i32, buf: u8&, n: u64) -> i64;
 
-fn run_command(line: const u8[:]) {
+fn run_command(io: epoll_ext::Loop&, line: const u8[:]) {
     let parts = words(line);
     if parts.len == 1 && parts[0] == "ping" {
-        let s = tcprouter::gather_stats(1);
+        let s = tcprouter::gather_stats(io, 1);
         print("PONG ", s.accepted);
     } else if parts.len == 3 && parts[0] == "deadline" {
         let tag, ok1 = parse_int(parts[1]);
         let until, ok2 = parse_int(parts[2]);
-        if ok1 && ok2 { tcprouter::post(tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
+        if ok1 && ok2 { tcprouter::post(io, tcprouter::Message.Deadline { tag: tag as u16, until_ms: until }); }
     }
 }
 
 thread_fn control() {
+    var io = epoll_ext::Loop { .. };                    // only names the wake operation; it never runs
     var pending: u8[>..] = [];
     var chunk: u8[256] = [0; 256];
     loop {
@@ -65,7 +79,7 @@ thread_fn control() {
         loop {
             let nl = find(pending, "\n");
             if nl < 0 { break; }
-            run_command(pending[..nl]);
+            run_command(io, pending[..nl]);
             let rest = pending.len - nl - 1;
             for k in rest { pending[k] = pending[nl + 1 + k]; }
             pending.pop_n(nl + 1);
@@ -91,7 +105,8 @@ fn main() {
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Handle { tag: 7 }));
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
-    let ids = tcprouter::spawn(cfg, 1, worker);
+    let ids = epoll_ext::spawn(1, cfg, worker);
+    tcprouter::workers_ready(1);
     thread_spawn(control);
     for id in ids { thread_wait(id); }
 }

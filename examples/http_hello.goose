@@ -6,6 +6,9 @@
 // Your per-connection state lives in your own slot_pool. On Opened you allocate a Session and tell
 // tcprouter its index with set_user; every later event carries that index back.
 import tcprouter from "..";
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
+
 import slot_pool;
 import std;
 import os;
@@ -18,21 +21,21 @@ let RESPONSE = "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nContent-Type: text/plain
 
 // One request head ends at a blank line. Answers every complete head in the buffer.
 // (A function of its own: a `return` inside the serve block would leave `worker`, not the block.)
-fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32,
+fn on_data(w: tcprouter::Worker&, io: epoll_ext::Loop&, sessions: slot_pool<Session>&, conn: tcprouter::Conn, user: u32,
            bytes: const u8[:]) {
     // The id comes back from the engine; check it anyway before indexing.
     if user >= sessions.items.len { return; }
     var s .= sessions.items[user];
     if !s.live { return; }
     if s.inbox.len + bytes.len > s.inbox.cap {            // request head too large
-        w.reset(conn);
+        w.reset(io, conn);
         return;
     }
     s.inbox.append(bytes);
     loop {
         let end = find(s.inbox, "\r\n\r\n");
         if end < 0 { break; }
-        w.send(conn, RESPONSE);
+        w.send(io, conn, RESPONSE);
         let used = end + 4;
         let rest = s.inbox.len - used;
         for k in rest { s.inbox[k] = s.inbox[used + k]; }
@@ -42,15 +45,17 @@ fn on_data(w: tcprouter::Worker&, sessions: slot_pool<Session>&, conn: tcprouter
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
     var sessions = slot_pool<Session> {};
+    var io = epoll_ext::Loop { .. };
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) { print(w.error); return; }
-    w.serve() { w, ev =>
-        match ev {
+    if !w.start(io, cfg, index) { print(w.error); return; }
+    io.attach(index);
+    io.serve() { io, ev => w.on_event(io, ev) { w, io, e =>
+        match e {
             Opened o => {
                 let i = sessions.alloc_index(Session { inbox: [], live: true });
-                w.set_user(o.conn, i as u32);
+                w.set_user(io, o.conn, i as u32);
             },
-            Data d => { on_data(w, sessions, d.conn, d.user, d.bytes); },
+            Data d => { on_data(w, io, sessions, d.conn, d.user, d.bytes); },
             Closed c => {
                 if c.user < sessions.items.len {
                     sessions.items[c.user].live = false;
@@ -59,7 +64,7 @@ thread_fn worker(cfg: tcprouter::Config, index: i64) {
             },
             _ => {},
         }
-    };
+    }; };
 }
 
 // `http_hello` listens on 0.0.0.0:8080; `http_hello 9000` on port 9000.
@@ -72,6 +77,6 @@ fn main() {
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Handle { tag: 1 }));
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { print(problems); exit(2); }
-    tcprouter::spawn(cfg, tcprouter::cpu_count(), worker);
-    tcprouter::wait_for_signal_then_drain(30000);
+    epoll_ext::spawn(epoll_ext::cpu_count(), cfg, worker);
+    epoll_ext::wait_for_signal_then_drain(30000);
 }

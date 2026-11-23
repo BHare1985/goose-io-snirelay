@@ -11,7 +11,10 @@
 //     CONNECT_FAILED slot=S tag=T tried=MASK
 //     CONNECTED tag=T
 //     CLOSED tag=T
-import tcprouter from "../../..";     // the path inside tcprouter (tests/net/harness/)
+import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
+import tcprouter from "../../..";
+var cfg: tcprouter::Config = tcprouter::Config { .. };     // the path inside tcprouter (tests/net/harness/)
 import std;
 import os;
 
@@ -47,14 +50,25 @@ fn spy::closed(p: spy::Policy&, conn: tcprouter::Conn, tag: u16, why: tcprouter:
 fn spy::on_message(p: spy::Policy&, body: const u8[:], now_ms: i64) -> tcprouter::Effect { tcprouter::Effect.None }
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {
+    var io = epoll_ext::Loop { .. };
+    io.limits.peek_bound = 32768;
+    io.limits.buffer_size = cfg.limits.buffer_size;
+    io.limits.buffers_per_loop = cfg.limits.buffers_per_worker;
+    io.limits.batch_min_events = cfg.limits.batch_min_events;
+    io.limits.batch_max_wait_us = cfg.limits.batch_max_wait_us;
+    io.limits.max_links = cfg.limits.max_conns_per_worker;
+    io.limits.connect_timeout_ms = cfg.limits.connect_timeout_ms;
+    io.limits.idle_timeout_ms = cfg.limits.idle_timeout_ms;
+    io.limits.half_close_timeout_ms = cfg.limits.half_close_timeout_ms;
     var w = tcprouter::Worker { .. };
-    if !w.start(cfg, index) { write_stderr(str("connect_ms_server: ", w.error, "\n")); return; }
+    if !w.start(io, cfg, index) { epoll_ext::report_failed_start(); write_stderr(str("connect_ms_server: ", w.error, "\n")); return; }
+    io.attach(index);
     var p = spy::Policy { .. };
     p.addrs = cfg.targets[0].addrs;
     p.count = cfg.targets[0].addrs.len;
     p.connect_ms = CONNECT_MS;
     print("READY");
-    w.serve(p) { w, ev => };
+    io.serve() { io, ev => w.on_event(io, ev, p); };
 }
 
 fn main() {
@@ -80,6 +94,7 @@ fn main() {
     cfg.routes.push(tcprouter::any_route(1, tcprouter::Action.Forward { to: tcprouter::add_target(cfg, t) }));
     var problems: u8[>..] = [];
     if !tcprouter::check(cfg, problems) { write_stderr(problems); exit(2); }
-    tcprouter::spawn(cfg, 1, worker);
-    tcprouter::wait_for_signal_then_drain(1000);
+    epoll_ext::spawn(1, cfg, worker);
+    tcprouter::workers_ready(1);
+    epoll_ext::wait_for_signal_then_drain(1000);
 }

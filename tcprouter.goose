@@ -9,17 +9,15 @@
 // Layout (all files declare `namespace tcprouter;`; internal names start with `c_`, see README.md):
 //
 //     sni.goose   the TLS ClientHello parser (design/04-sni.md)
-//     sys.goose   libc and the small C layer in src/c_sys.c
+//     types.goose router.goose handler.goose messages.goose   the router, generic over a goose-io event loop
 namespace tcprouter;
 
 import .sni;
-import .sys;
 import .config;
-import .engine;
 import .route;
 import .address;
 import .check;
-import .conn;
-import .policy;
+import .types;
+import .router;
 import .handler;
 import .messages;

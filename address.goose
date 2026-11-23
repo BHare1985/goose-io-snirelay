@@ -137,3 +137,9 @@ fn _parse_ipv6(text: const u8[:], out: u8[16]&) -> bool {
     }
     true
 }
+
+// Whether `text` is an address a link can be dialled to (used by the router beside a loop, which owns no sockets).
+fn address_ok(text: const u8[:]) -> bool {
+    var p = _ParsedAddress { false, [0; 16], 0 };
+    return _parse_address(text, p);
+}
