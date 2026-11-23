@@ -12,8 +12,8 @@
 //   GET /sni    the server name the client sent
 //   GET /live   how many sessions this worker holds
 
-import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
-import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
+import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import gslib from "github.com/SorinS/gslib@714f87b387f2f9de6a4c7a77d9abc9db2516ee80";
 import gslib.crypto.tls;

@@ -5,8 +5,8 @@
 // Prints: READY, `EV opened`, `EV data N`, `EV closed`, `PASSEND`, `PASSEND_SEND true|false` (a send of 4 bytes "late" to the last connection during PassEnd).
 // A Data event whose bytes start with "slow" sleeps 300 ms inside the handler (so a tag deadline can pass between the event and the PassEnd).
 // stdin: `deadline TAG MS`, `ping` (a Stats gather: a posted message that delivers no handler event).
-import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
-import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
+import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import std;
 import os;

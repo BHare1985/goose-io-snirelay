@@ -19,8 +19,8 @@
 //   E open S:G tag=T        E data S:G n=N        E writable S:G        E closed S:G total=N fnv=H why=W
 //   E tick MS               E forward S:G result=true|false           E sent-all S:G falses=N writables=M
 // (S:G is the connection's slot and generation; FNV-1a 64 is taken over the bytes received.)
-import goose_io from "github.com/BHare1985/goose-io@bfadab427f4ac37a89d9182fbd943d0c9e0d7457";
-import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@ee6e3c9f414f300e4ffe2180f16d9ebe3230233e";
+import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import slot_pool;
 import std;
