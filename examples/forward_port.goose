@@ -3,7 +3,7 @@
 //     goose build examples/forward_port.goose && ./examples/forward_port
 //
 import tcprouter from "..";
-import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import goose_io from "github.com/BHare1985/goose-io@v0.4";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {

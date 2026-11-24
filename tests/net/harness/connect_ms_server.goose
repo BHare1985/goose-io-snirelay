@@ -11,7 +11,7 @@
 //     CONNECT_FAILED slot=S tag=T tried=MASK
 //     CONNECTED tag=T
 //     CLOSED tag=T
-import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import goose_io from "github.com/BHare1985/goose-io@v0.4";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 var cfg: tcprouter::Config = tcprouter::Config { .. };     // the path inside tcprouter (tests/net/harness/)

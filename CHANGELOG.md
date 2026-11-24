@@ -2,6 +2,10 @@
 
 **Tags.** `v0` means "the latest compatible release": it does not move across a breaking change (it stays on v0.3.0 because v0.4.0 changed `Event`). Pin an exact tag (`v0.4.0`) to get a breaking release.
 
+## Unreleased
+
+* Pinned to goose-io contract v0.4 (capabilities: a loop declares what it supplies). The router still requires the core and ten capabilities (all but unix), which goose-io-epoll-ext declares. No API change. goose-io-epoll-ext must be at a commit that declares them.
+
 ## v0.6.1 (2026-11-17)
 
 * A server that ends before its first byte is retried (RT-21, docs/early-close-retry.md). On an `inspect: Sni` listener the client's hello is sent from a peek and stays in the client's socket until the server's first byte; if the server

@@ -21,7 +21,7 @@
 //   B3. On a listener whose inspect is None, only Any rows can match; the hello is ignored.
 //   B4. NeedMore and Invalid match nothing (null), whatever rows exist, Any included.
 import tcprouter from "../..";
-import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import goose_io from "github.com/BHare1985/goose-io@v0.4";
 import std;
 
 var checks: i64 = 0;

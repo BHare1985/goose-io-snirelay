@@ -21,7 +21,7 @@
 //     READY <worker index>                      after start() succeeded
 //     STAT <worker> accepted=… open=… … buffer_waits=…   every --stat-ms, from a Tick event
 // Errors go to stderr. Exit status 2 for a bad command line or config.
-import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import goose_io from "github.com/BHare1985/goose-io@v0.4";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import std;

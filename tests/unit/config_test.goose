@@ -18,7 +18,7 @@
 //   C3. A config with no listeners, or a route with no matching listener, is reported; zero routes is
 //       fine (a listener whose connections are all handled by nobody simply closes them).
 import tcprouter from "../..";
-import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import goose_io from "github.com/BHare1985/goose-io@v0.4";
 import std;
 
 var checks: i64 = 0;

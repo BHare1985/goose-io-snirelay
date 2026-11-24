@@ -19,7 +19,7 @@
 //    when there is room and the same function continues from the same offsets. Nothing is copied to "retry".
 //  * The block you pass to serve only calls named functions: a `return` inside it would leave the worker.
 import tcprouter from "..";
-import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import goose_io from "github.com/BHare1985/goose-io@v0.4";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 
 import slot_pool;

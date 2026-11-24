@@ -1,9 +1,9 @@
 // tcprouter on goose-io (port, stage 1): forward by listener. A Router lives beside an event loop and owns no sockets: it
-// is generic over the loop and uses only the contract (goose_io.goose) and its groups.
+// is generic over the loop and uses only the contract (goose_io.goose) and its capabilities.
 namespace tcprouter;
 
 import std;
-import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import goose_io from "github.com/BHare1985/goose-io@v0.4";
 
 
 // What a link's _Rec.role says it is.
@@ -126,7 +126,7 @@ fn _kind_text(k: goose_io::ListenErrorKind) -> const u8[:] {
     };
 }
 
-// Requires the groups the router uses, then listens on every configured listener. false (and `error` says why) when not.
+// Requires the capabilities the router uses, then listens on every configured listener. false (and `error` says why) when not.
 fn start<Io>(w: Worker&, io: Io&, cfg: const Config&, index: i64) -> bool {
     goose_io::require_core(io);
     goose_io::require_half_close(io);

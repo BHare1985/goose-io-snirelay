@@ -4,7 +4,7 @@
 //
 // stdin: `stats` prints `BATCH waits=W wait_us=U accepted=A open=O`; `deadline TAG MS` posts Message.Deadline; `ping` gathers and prints `PONG` (the test times it).
 // stdout: READY.
-import goose_io from "github.com/BHare1985/goose-io@v0.3";
+import goose_io from "github.com/BHare1985/goose-io@v0.4";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import std;
