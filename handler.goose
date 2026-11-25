@@ -4,7 +4,7 @@
 namespace tcprouter;
 
 import std;
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 
 fn _link(c: Conn) -> goose_io::Link { return goose_io::Link { slot: c.slot, gen: c.gen }; }
 fn _conn(l: goose_io::Link) -> Conn { return Conn { slot: l.slot, gen: l.gen }; }

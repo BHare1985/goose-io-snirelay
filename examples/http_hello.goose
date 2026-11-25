@@ -6,7 +6,7 @@
 // Your per-connection state lives in your own slot_pool. On Opened you allocate a Session and tell
 // tcprouter its index with set_user; every later event carries that index back.
 import tcprouter from "..";
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 
 import slot_pool;

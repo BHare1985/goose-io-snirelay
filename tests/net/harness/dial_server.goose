@@ -11,7 +11,7 @@
 //   GET /open                 how many connections this worker has open (the leak check)
 // stdin (control): `deadline TAG MS`.
 // stdout: `DIAL send_before_open=B`, `DIAL_OPENED id=N`, `DIAL_CLOSED id=N why=W opened=B`, `FENCE_SEND_FALSE`, `READY`.
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import slot_pool;

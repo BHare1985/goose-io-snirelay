@@ -5,7 +5,7 @@
 // config_test proves check() accepts and rejects the right texts. This proves the BYTES a good text
 // parses to, since a wrong byte here binds the wrong address and no check would notice.
 import tcprouter from "../..";
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 
 var checks: i64 = 0;
 var failures: i64 = 0;

@@ -10,7 +10,7 @@
 //   GET /trickle  opts in, then sends one byte on every Tick until send says false (fencing must end it)
 //   GET /plain/N  like /N but WITHOUT the opt-in (the default: the connection closes after the peer's EOF, queued bytes flushed first)
 // stdout: READY, PEER_EOF (once per connection that opted in), CLOSED why=W, ROOM ...
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import slot_pool;

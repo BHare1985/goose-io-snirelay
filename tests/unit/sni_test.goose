@@ -20,7 +20,7 @@
 // need not be exact; an IPv4 literal passes the name rule.
 
 import tcprouter from "../..";
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 import std;
 
 var checks: i64 = 0;

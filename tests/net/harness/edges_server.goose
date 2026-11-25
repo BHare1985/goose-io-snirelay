@@ -13,7 +13,7 @@
 //   DO FWDONEOF x     when x's peer half-closes (PeerEof), try forward(x, 127.0.0.1:1): prints `FWD_ON_EOF x true|false`
 //   DO DIAL ADDR MS   w.dial(io, ADDR, 7, MS) as connection `#`: prints `DIAL_OPENED` or `CLOSED # why`
 // Prints: READY, `DATA x n` (a read that is not a command), `WRITABLE x`, `CLOSED x why`, and the lines above.
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import std;

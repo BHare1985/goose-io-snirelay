@@ -3,7 +3,7 @@
 //     signal_server --listen 127.0.0.1:9000 --to 127.0.0.1:9100 [--deadline MS]
 //
 // Prints READY, then after a signal `SIGNAL n`, after the drain `DRAINED k` (k = open sessions closed at the deadline, 0 = every session ended).
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import std;

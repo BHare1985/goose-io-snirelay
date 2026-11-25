@@ -7,7 +7,7 @@ namespace tcprouter;
 
 import std;
 import binary;
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 
 let _MESSAGE_DRAIN: i64 = 1;
 let _MESSAGE_DEADLINE: i64 = 2;

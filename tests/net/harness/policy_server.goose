@@ -21,7 +21,7 @@
 //     fn closed(p: P&, conn: Conn, tag: u16, why: CloseReason)
 // `tried` is a per-connection bit set the ENGINE keeps: it sets bit `slot` of the Pick.To it was handed before it
 // connects, and passes the set back on every later call for that connection.
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 var cfg: tcprouter::Config = tcprouter::Config { .. };     // the path inside tcprouter (tests/net/harness/); see README.md

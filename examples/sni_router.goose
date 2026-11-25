@@ -4,7 +4,7 @@
 //     goose build examples/sni_router.goose && ./examples/sni_router
 //
 import tcprouter from "..";
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 
 thread_fn worker(cfg: tcprouter::Config, index: i64) {

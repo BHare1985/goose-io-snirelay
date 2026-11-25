@@ -3,7 +3,7 @@
 namespace tcprouter;
 
 import std;
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 
 
 // What a link's _Rec.role says it is.
@@ -138,12 +138,13 @@ fn start<Io>(w: Worker&, io: Io&, cfg: const Config&, index: i64) -> bool {
     goose_io::require_revoke(io);
     goose_io::require_wake(io);
     goose_io::require_limits(io);
+    goose_io::require_shared_listen(io);
     w.cfg = cfg;
     w.index = index;
     for f in cfg.fenced_tags { w.tags.push(_TagEntry { tag: f, until_ms: 0 }); }
     for k in cfg.listeners.len {
         let text = cfg.listeners[k].addr.text;
-        let l, err = io.listen(text);
+        let l, err = io.listen_shared(text);
         if goose_io::failed(err) {
             w.error.append("cannot listen on ");
             w.error.append(text);

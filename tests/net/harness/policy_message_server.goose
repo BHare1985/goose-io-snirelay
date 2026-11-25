@@ -5,7 +5,7 @@
 // stdin commands (a control thread, as in tls_server): `msg TEXT` posts Message.Policy { body: TEXT } to every worker.
 // Hook lines on stdout: READY; `PICK slot=S tag=T`; `CONNECTED tag=T`; `CLOSED tag=T`; `MSG worker=W body=TEXT now_ok=B`.
 // The double answers a body "cut" with Effect.CloseTagged { tag: 40, gen: 7 } (the tag its pick returns), anything else None.
-import goose_io from "github.com/BHare1985/goose-io@v0.4";
+import goose_io from "github.com/BHare1985/goose-io@apply-name-resolution";
 import epoll_ext from "github.com/BHare1985/goose-io-epoll-ext@main";
 import tcprouter from "../../..";
 import std;
